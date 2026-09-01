@@ -13,15 +13,14 @@ Raw CSV를 읽어 다음 작업을 수행한다.
 8. Processed CSV 저장
 """
 
+import ast
 from datetime import datetime
 from pathlib import Path
-import ast
 
 import pandas as pd
 
+from .config import PROCESSED_DATA_DIR
 
-PROJECT_DIR = Path(__file__).resolve().parents[2]
-PROCESSED_DATA_DIR = PROJECT_DIR / "data" / "processed"
 
 FINAL_COLUMNS = [
     "restaurant_id",
@@ -56,7 +55,10 @@ def load_raw_csv(file_path: Path) -> pd.DataFrame:
             f"Raw CSV 파일이 없습니다. {file_path}"
         )
 
-    return pd.read_csv(file_path, encoding='utf-8-sig')
+    return pd.read_csv(
+        file_path,
+        encoding='utf-8-sig',
+    )
 
 
 def parse_menu_list(value: object) -> list[dict]:
@@ -87,7 +89,9 @@ def build_restaurant_categories(
             restaurant_categories[source_url].append(category)
 
     for source_url in restaurant_categories:
-        restaurant_categories[source_url] = ', '.join(restaurant_categories[source_url])
+        restaurant_categories[source_url] = ', '.join(
+            restaurant_categories[source_url]
+        )
 
     return restaurant_categories
 
@@ -99,7 +103,10 @@ def preprocess_restaurants(
     """Raw DataFrame을 최종 DB 적재 구조로 전처리한다."""
     restaurant_df = raw_df.copy()
 
-    restaurant_df['menu_list'] = restaurant_df['menu_list'].map(parse_menu_list)
+    restaurant_df['menu_list'] = (
+        restaurant_df['menu_list']
+        .map(parse_menu_list)
+    )
 
     feature_list: list[str | None] = []
 
@@ -131,22 +138,46 @@ def preprocess_restaurants(
         menu_list = restaurant_df.loc[index, 'menu_list']
 
         if len(menu_list) >= 1:
-            restaurant_df.loc[index, 'menu_1_name'] = menu_list[0]['menu_name']
-            restaurant_df.loc[index, 'menu_1_price'] = menu_list[0]['menu_price']
+            restaurant_df.loc[index, 'menu_1_name'] = (
+                menu_list[0]['menu_name']
+            )
+            restaurant_df.loc[index, 'menu_1_price'] = (
+                menu_list[0]['menu_price']
+            )
 
         if len(menu_list) >= 2:
-            restaurant_df.loc[index, 'menu_2_name'] = menu_list[1]['menu_name']
-            restaurant_df.loc[index, 'menu_2_price'] = menu_list[1]['menu_price']
+            restaurant_df.loc[index, 'menu_2_name'] = (
+                menu_list[1]['menu_name']
+            )
+            restaurant_df.loc[index, 'menu_2_price'] = (
+                menu_list[1]['menu_price']
+            )
 
         if len(menu_list) >= 3:
-            restaurant_df.loc[index, 'menu_3_name'] = menu_list[2]['menu_name']
-            restaurant_df.loc[index, 'menu_3_price'] = menu_list[2]['menu_price']
+            restaurant_df.loc[index, 'menu_3_name'] = (
+                menu_list[2]['menu_name']
+            )
+            restaurant_df.loc[index, 'menu_3_price'] = (
+                menu_list[2]['menu_price']
+            )
 
-    restaurant_categories = build_restaurant_categories(restaurant_list)
+    restaurant_categories = build_restaurant_categories(
+        restaurant_list
+    )
 
-    restaurant_df['categories'] = restaurant_df['source_url'].map(restaurant_categories)
+    restaurant_df['categories'] = (
+        restaurant_df['source_url']
+        .map(restaurant_categories)
+    )
 
-    restaurant_df = restaurant_df.drop(columns=['category', 'tag', 'char', 'menu_list'])
+    restaurant_df = restaurant_df.drop(
+        columns=[
+            'category',
+            'tag',
+            'char',
+            'menu_list',
+        ]
+    )
 
     restaurant_df["restaurant_id"] = (
         restaurant_df["source_url"]
@@ -210,6 +241,7 @@ def validate_restaurant_df(
         .duplicated()
         .sum()
     )
+
     source_url_duplicates = int(
         restaurant_df["source_url"]
         .duplicated()
@@ -256,14 +288,20 @@ def save_processed_csv(
         encoding="utf-8-sig",
     )
 
-    processed_load_df = pd.read_csv(processed_file_path, encoding='utf-8-sig')
+    processed_load_df = pd.read_csv(
+        processed_file_path,
+        encoding='utf-8-sig',
+    )
 
     if restaurant_df.shape != processed_load_df.shape:
         raise ValueError(
             "Processed CSV 저장 전후 데이터 크기가 다릅니다."
         )
 
-    print(f'Processed CSV 저장 완료: {processed_file_path}')
+    print(
+        f'Processed CSV 저장 완료: '
+        f'{processed_file_path}'
+    )
 
     return processed_file_path
 
@@ -285,12 +323,22 @@ def run_preprocess(
         restaurant_list,
     )
 
-    summary = validate_restaurant_df(restaurant_df)
+    summary = validate_restaurant_df(
+        restaurant_df
+    )
 
-    print('전처리 검증 결과:', summary)
+    print(
+        '전처리 검증 결과:',
+        summary,
+    )
 
-    return save_processed_csv(restaurant_df)
+    return save_processed_csv(
+        restaurant_df
+    )
 
 
 if __name__ == "__main__":
-    print('preprocess.py는 main.py에서 run_preprocess()로 실행합니다.')
+    print(
+        'preprocess.py는 main.py에서 '
+        'run_preprocess()로 실행합니다.'
+    )

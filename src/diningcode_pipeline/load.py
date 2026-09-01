@@ -9,18 +9,20 @@ DiningCode Processed CSV MySQL 저장 모듈
 6. 저장 건수 및 샘플 데이터 검증
 """
 
-import os
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from dotenv import load_dotenv
-from sqlalchemy import URL, create_engine, text
+from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from .database import (
+    create_database_if_not_exists,
+    create_mysql_engine,
+    load_database_config,
+    test_mysql_connection,
+)
 
-PROJECT_DIR = Path(__file__).resolve().parents[2]
-ENV_FILE = PROJECT_DIR / ".env"
 
 TABLE_NAME = "diningcode_restaurant"
 
@@ -176,7 +178,10 @@ def prepare_database_dataframe(
     df: pd.DataFrame,
 ) -> pd.DataFrame:
     """DB 저장용 컬럼과 자료형을 정리하고 검증한다."""
-    missing_columns = set(DB_COLUMNS) - set(df.columns)
+    missing_columns = (
+        set(DB_COLUMNS)
+        - set(df.columns)
+    )
 
     if missing_columns:
         raise ValueError(
@@ -200,10 +205,19 @@ def prepare_database_dataframe(
             .replace('', pd.NA)
         )
 
-    database_df['collected_at'] = pd.to_datetime(database_df['collected_at'], errors='coerce')
+    database_df['collected_at'] = pd.to_datetime(
+        database_df['collected_at'],
+        errors='coerce',
+    )
 
-    null_counts = database_df[REQUIRED_DB_COLUMNS].isna().sum()
-    invalid_nulls = null_counts[null_counts > 0]
+    null_counts = (
+        database_df[REQUIRED_DB_COLUMNS]
+        .isna()
+        .sum()
+    )
+    invalid_nulls = null_counts[
+        null_counts > 0
+    ]
 
     if not invalid_nulls.empty:
         raise ValueError(
@@ -238,100 +252,19 @@ def dataframe_to_database_records(
 
             if pd.isna(value):
                 record[column] = None
+
             elif column == 'collected_at':
-                record[column] = pd.Timestamp(value).to_pydatetime()
+                record[column] = (
+                    pd.Timestamp(value)
+                    .to_pydatetime()
+                )
+
             else:
                 record[column] = str(value)
 
         records.append(record)
 
     return records
-
-
-def load_database_config() -> dict[str, str | int]:
-    """프로젝트 .env에서 MySQL 접속 정보를 읽는다."""
-    load_dotenv(dotenv_path=ENV_FILE)
-
-    required_names = [
-        "DB_HOST",
-        "DB_PORT",
-        "DB_NAME",
-        "DB_USER",
-        "DB_PASSWORD",
-    ]
-
-    config = {
-        name: os.getenv(name)
-        for name in required_names
-    }
-
-    missing_names = [
-        name
-        for name, value in config.items()
-        if not value
-    ]
-
-    if missing_names:
-        raise ValueError(
-            f'.env에 DB 설정이 없습니다. '
-            f'{missing_names}'
-        )
-
-    return {
-        'host': str(config['DB_HOST']),
-        'port': int(str(config['DB_PORT'])),
-        'database': str(config['DB_NAME']),
-        'user': str(config['DB_USER']),
-        'password': str(config['DB_PASSWORD']),
-    }
-
-
-def create_database_if_not_exists(
-    config: dict[str, str | int],
-) -> None:
-    """MySQL 서버에 크롤링 전용 DB가 없으면 생성한다."""
-    server_url = URL.create(
-        drivername='mysql+pymysql',
-        username=str(config['user']),
-        password=str(config['password']),
-        host=str(config['host']),
-        port=int(config['port']),
-        query={'charset': 'utf8mb4'},
-    )
-
-    server_engine = create_engine(server_url)
-
-    try:
-        with server_engine.connect() as connection:
-            connection.execute(
-                text(
-                    f"""
-                    CREATE DATABASE IF NOT EXISTS
-                    `{config['database']}`
-                    CHARACTER SET utf8mb4
-                    COLLATE utf8mb4_unicode_ci
-                    """
-                )
-            )
-    finally:
-        server_engine.dispose()
-
-
-def create_mysql_engine(
-    config: dict[str, str | int],
-) -> Engine:
-    """크롤링 전용 DB용 SQLAlchemy Engine을 생성한다."""
-    database_url = URL.create(
-        drivername='mysql+pymysql',
-        username=str(config['user']),
-        password=str(config['password']),
-        host=str(config['host']),
-        port=int(config['port']),
-        database=str(config['database']),
-        query={'charset': 'utf8mb4'},
-    )
-
-    return create_engine(database_url)
 
 
 def create_table(
@@ -349,7 +282,6 @@ def upsert_restaurants(
     records: list[dict[str, Any]],
 ) -> int:
     """음식점 데이터를 MySQL에 UPSERT한다."""
-
     if not records:
         return 0
 
@@ -375,7 +307,11 @@ def validate_database(
             )
         ).scalar_one()
 
-    status = '일치' if processed_count == db_count else '불일치'
+    status = (
+        '일치'
+        if processed_count == db_count
+        else '불일치'
+    )
 
     sample_df = pd.read_sql(
         text(
@@ -405,17 +341,6 @@ def validate_database(
     }
 
 
-def test_mysql_connection(
-    engine: Engine,
-) -> None:
-    """MySQL 연결을 확인한다."""
-
-    with engine.connect() as connection:
-        result = connection.execute(text('SELECT 1'))
-
-        print('MySQL 연결 확인:', result.scalar())
-
-
 def run_load(
     processed_csv_file: Path,
 ) -> dict[str, int | str]:
@@ -425,23 +350,50 @@ def run_load(
     Returns:
         Processed CSV 건수, DB 건수, 건수 비교 결과
     """
-    processed_df = load_processed_csv(processed_csv_file)
-    database_df = prepare_database_dataframe(processed_df)
-    records = dataframe_to_database_records(database_df)
+    processed_df = load_processed_csv(
+        processed_csv_file
+    )
+
+    database_df = prepare_database_dataframe(
+        processed_df
+    )
+
+    records = dataframe_to_database_records(
+        database_df
+    )
+
     config = load_database_config()
-    create_database_if_not_exists(config)
-    engine = create_mysql_engine(config)
+
+    create_database_if_not_exists(
+        config
+    )
+
+    engine = create_mysql_engine(
+        config
+    )
 
     try:
-        test_mysql_connection(engine)
-        
-        create_table(engine)
+        test_mysql_connection(
+            engine
+        )
 
-        upsert_restaurants(engine, records)
+        create_table(
+            engine
+        )
 
-        summary = validate_database(engine, processed_count=len(database_df))
+        upsert_restaurants(
+            engine,
+            records,
+        )
 
-        print(f'MySQL 저장 결과: {summary}')
+        summary = validate_database(
+            engine,
+            processed_count=len(database_df),
+        )
+
+        print(
+            f'MySQL 저장 결과: {summary}'
+        )
 
         return summary
 
@@ -451,4 +403,7 @@ def run_load(
 
 
 if __name__ == '__main__':
-    print('load.py는 main.py에서 run_load()로 실행합니다.')
+    print(
+        'load.py는 main.py에서 '
+        'run_load()로 실행합니다.'
+    )

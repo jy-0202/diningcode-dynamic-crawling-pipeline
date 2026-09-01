@@ -27,29 +27,21 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-
-# ===========================================================
-# 1. 수집 설정
-# ===========================================================
-
-BASE_URL = 'https://www.diningcode.com/'
-
-TARGET_CITY = '서울'
-TARGET_REGION = '강남역'
-
-MAX_SCROLLS = 2
-MAX_RESTAURANTS_PER_CATEGORY = 5
-MAX_TOTAL_RESTAURANTS = 100
-TOP_MENU_COUNT = 3
-
-WAIT_TIMEOUT = 10
-
-PROJECT_DIR = Path(__file__).resolve().parents[2]
-RAW_DATA_DIR = PROJECT_DIR / 'data' / 'raw'
+from .config import (
+    BASE_URL,
+    MAX_RESTAURANTS_PER_CATEGORY,
+    MAX_SCROLLS,
+    MAX_TOTAL_RESTAURANTS,
+    RAW_DATA_DIR,
+    TARGET_CITY,
+    TARGET_REGION,
+    TOP_MENU_COUNT,
+    WAIT_TIMEOUT,
+)
 
 
 # ===========================================================
-# 2. 기본 함수
+# 1. 기본 함수
 # ===========================================================
 
 def ensure_directory(directory: Path) -> Path:
@@ -70,7 +62,7 @@ def create_driver() -> tuple[webdriver.Chrome, WebDriverWait]:
 
 
 # ===========================================================
-# 3. 사이트 접속 및 지역 선택
+# 2. 사이트 접속 및 지역 선택
 # ===========================================================
 
 def open_site(driver: webdriver.Chrome, wait: WebDriverWait) -> None:
@@ -146,7 +138,7 @@ def select_region(
 
 
 # ===========================================================
-# 4. 결과 스크롤
+# 3. 결과 스크롤
 # ===========================================================
 
 def scroll_results(
@@ -163,7 +155,9 @@ def scroll_results(
             )
         )
 
-        driver.execute_script('window.scrollTo(0, document.body.scrollHeight);')
+        driver.execute_script(
+            'window.scrollTo(0, document.body.scrollHeight);'
+        )
 
         wait.until(
             lambda current_driver: len(
@@ -188,7 +182,7 @@ def scroll_results(
 
 
 # ===========================================================
-# 5. 카테고리별 음식점 후보 수집
+# 4. 카테고리별 음식점 후보 수집
 # ===========================================================
 
 def collect_restaurant_list(
@@ -276,7 +270,7 @@ def remove_duplicate_restaurants(
 
 
 # ===========================================================
-# 6. 상세페이지 수집
+# 5. 상세페이지 수집
 # ===========================================================
 
 def get_optional_text(
@@ -414,17 +408,24 @@ def collect_restaurant_details(
             f'{restaurant["restaurant_name"]} 수집 중'
         )
 
-        detail = collect_restaurant_detail(driver, wait, restaurant)
+        detail = collect_restaurant_detail(
+            driver,
+            wait,
+            restaurant,
+        )
 
         restaurant_result_list.append(detail)
 
-    print('전체 상세정보 수집 건수:', len(restaurant_result_list))
+    print(
+        '전체 상세정보 수집 건수:',
+        len(restaurant_result_list),
+    )
 
     return restaurant_result_list
 
 
 # ===========================================================
-# 7. Raw CSV 저장
+# 6. Raw CSV 저장
 # ===========================================================
 
 def save_raw_csv(
@@ -448,7 +449,10 @@ def save_raw_csv(
         encoding='utf-8-sig',
     )
 
-    raw_load_df = pd.read_csv(raw_file_path, encoding='utf-8-sig')
+    raw_load_df = pd.read_csv(
+        raw_file_path,
+        encoding='utf-8-sig',
+    )
 
     if raw_df.shape != raw_load_df.shape:
         raise ValueError(
@@ -462,7 +466,7 @@ def save_raw_csv(
 
 
 # ===========================================================
-# 8. 대표 실행 함수
+# 7. 대표 실행 함수
 # ===========================================================
 
 def run_crawling() -> tuple[Path, list[dict]]:
@@ -485,11 +489,19 @@ def run_crawling() -> tuple[Path, list[dict]]:
 
         restaurant_list = collect_restaurant_list(driver)
 
-        unique_restaurant_list = remove_duplicate_restaurants(restaurant_list)
+        unique_restaurant_list = remove_duplicate_restaurants(
+            restaurant_list
+        )
 
-        restaurant_result_list = collect_restaurant_details(driver, wait, unique_restaurant_list)
+        restaurant_result_list = collect_restaurant_details(
+            driver,
+            wait,
+            unique_restaurant_list,
+        )
 
-        raw_csv_file = save_raw_csv(restaurant_result_list)
+        raw_csv_file = save_raw_csv(
+            restaurant_result_list
+        )
 
         return raw_csv_file, restaurant_list
 

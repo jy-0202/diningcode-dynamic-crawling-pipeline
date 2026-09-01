@@ -1,7 +1,7 @@
 # DiningCode Dynamic Crawling Pipeline
 
-Selenium을 활용해 DiningCode의 동적 페이지에서 음식점 정보를 제한적으로 수집하고,
-Raw CSV 저장 → 전처리 및 검증 → Processed CSV 저장 → MySQL UPSERT까지 수행하는
+Selenium을 활용해 DiningCode의 동적 페이지에서 음식점 정보를 제한적으로 수집하고,  
+Raw CSV 저장 → 전처리 및 검증 → Processed CSV 저장 → MySQL UPSERT까지 수행하는  
 개인 데이터 수집 파이프라인 프로젝트입니다.
 
 ## 1. 프로젝트 목적
@@ -51,7 +51,17 @@ run_preprocess()
 run_load()
 ```
 
-## 4. 주요 기능
+## 4. 주요 모듈 및 기능
+
+### Config
+
+`src/diningcode_pipeline/config.py`
+
+- 프로젝트 루트 및 데이터 저장 경로 관리
+- DiningCode 기본 URL 관리
+- 수집 대상 지역 설정
+- 최대 스크롤 횟수 및 수집 건수 제한 설정
+- 메뉴 수집 개수 및 Selenium 대기시간 설정
 
 ### Crawling
 
@@ -82,13 +92,23 @@ run_load()
 - `restaurant_id`, `source_url` 중복 검증
 - Processed CSV 저장
 
+### Database
+
+`src/diningcode_pipeline/database.py`
+
+- `.env`에서 MySQL 접속 정보 로드
+- 필수 DB 환경변수 검증
+- 데이터베이스가 없으면 생성
+- SQLAlchemy Engine 생성
+- MySQL 연결 상태 확인
+
 ### Load
 
 `src/diningcode_pipeline/load.py`
 
 - Processed CSV 로드
-- `.env`의 MySQL 접속 정보 사용
-- 데이터베이스가 없으면 생성
+- DB 저장용 컬럼 및 자료형 정리
+- 필수값 및 중복 데이터 검증
 - `diningcode_restaurant` 테이블 생성
 - 음식점 데이터 UPSERT
 - Processed CSV 건수와 DB 저장 건수 검증
@@ -123,7 +143,9 @@ run_load()
 ├── src/
 │   └── diningcode_pipeline/
 │       ├── __init__.py
+│       ├── config.py
 │       ├── crawling.py
+│       ├── database.py
 │       ├── preprocess.py
 │       └── load.py
 ├── data/                         # 파이프라인 실행 시 생성
@@ -136,7 +158,7 @@ run_load()
 └── requirements.txt
 ```
 
-`data/raw`, `data/processed` 디렉터리는 파이프라인 실행 시 자동으로 생성되며,
+`data/raw`, `data/processed` 디렉터리는 파이프라인 실행 시 자동으로 생성되며,  
 생성된 CSV 파일과 실제 DB 접속 정보가 들어 있는 `.env` 파일은 Git에 포함하지 않습니다.
 
 ## 7. 실행 환경
@@ -245,10 +267,10 @@ data/processed/
 
 ## 13. MySQL 적재 방식
 
-`restaurant_id`를 Primary Key로 사용하고,
+`restaurant_id`를 Primary Key로 사용하고,  
 `source_url`에는 UNIQUE 제약을 적용합니다.
 
-동일 음식점이 다시 수집되더라도 `ON DUPLICATE KEY UPDATE` 방식으로 갱신하여
+동일 음식점이 다시 수집되더라도 `ON DUPLICATE KEY UPDATE` 방식으로 갱신하여  
 반복 실행 시 중복 레코드가 계속 추가되는 것을 방지합니다.
 
 ## 14. 향후 개선
