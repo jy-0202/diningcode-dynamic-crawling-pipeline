@@ -21,7 +21,6 @@ import pandas as pd
 
 from .config import PROCESSED_DATA_DIR
 
-
 FINAL_COLUMNS = [
     "restaurant_id",
     "restaurant_name",
@@ -63,11 +62,11 @@ def load_raw_csv(file_path: Path) -> pd.DataFrame:
 
 def parse_menu_list(value: object) -> list[dict]:
     """CSV 문자열로 저장된 menu_list를 Python list로 복원한다."""
-    if pd.isna(value):
-        return []
-
     if isinstance(value, list):
         return value
+
+    if pd.isna(value):
+        return []
 
     return ast.literal_eval(str(value))
 

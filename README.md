@@ -13,6 +13,8 @@ Raw CSV 저장 → 전처리 및 검증 → Processed CSV 저장 → MySQL UPSER
 - 데이터 정제 및 품질 검증
 - MySQL 저장
 - PK / UNIQUE 제약을 이용한 UPSERT
+- pytest 기반 단위 테스트
+- Ruff 및 GitHub Actions를 이용한 코드 품질 검사와 CI
 
 ## 2. 수집 대상 및 범위
 
@@ -140,6 +142,9 @@ run_load()
 
 ```text
 .
+├── .github/
+│   └── workflows/
+│       └── ci.yml
 ├── src/
 │   └── diningcode_pipeline/
 │       ├── __init__.py
@@ -148,13 +153,22 @@ run_load()
 │       ├── database.py
 │       ├── preprocess.py
 │       └── load.py
+├── tests/
+│   ├── conftest.py
+│   ├── test_crawling.py
+│   ├── test_database.py
+│   ├── test_load.py
+│   ├── test_main.py
+│   └── test_preprocess.py
 ├── data/                         # 파이프라인 실행 시 생성
 │   ├── raw/
 │   └── processed/
 ├── .env.example
 ├── .gitignore
 ├── main.py
+├── pyproject.toml
 ├── README.md
+├── requirements-dev.txt
 └── requirements.txt
 ```
 
@@ -174,6 +188,12 @@ run_load()
 - SQLAlchemy
 - PyMySQL
 - python-dotenv
+
+개발 및 코드 품질 도구:
+
+- pytest
+- Ruff
+- GitHub Actions
 
 ## 8. 설치
 
@@ -195,10 +215,16 @@ macOS / Linux:
 source .venv/bin/activate
 ```
 
-패키지 설치:
+프로젝트 실행에 필요한 패키지 설치:
 
 ```bash
 pip install -r requirements.txt
+```
+
+테스트와 코드 검사까지 수행하려면 개발용 패키지를 설치합니다.
+
+```bash
+pip install -r requirements-dev.txt
 ```
 
 ## 9. 환경변수 설정
@@ -273,7 +299,48 @@ data/processed/
 동일 음식점이 다시 수집되더라도 `ON DUPLICATE KEY UPDATE` 방식으로 갱신하여  
 반복 실행 시 중복 레코드가 계속 추가되는 것을 방지합니다.
 
-## 14. 향후 개선
+## 14. 테스트 및 CI
+
+외부 사이트나 실제 MySQL에 의존하지 않도록 단위 테스트에서는 pytest의 `monkeypatch`, 임시 경로, Fake 객체를 활용합니다.
+
+현재 총 51개의 단위 테스트로 다음 내용을 검증합니다.
+
+- 크롤링 보조 함수와 `source_url` 중복 제거
+- 선택 요소 및 메뉴 데이터 처리
+- Raw / Processed CSV 저장
+- 메뉴 문자열 파싱과 카테고리 통합
+- 전처리 결과 필수값 및 중복 검증
+- `.env` 기반 DB 설정 검증
+- SQLAlchemy Engine 생성 설정
+- DB 저장용 DataFrame과 Python 레코드 변환
+- CREATE TABLE / UPSERT 호출 로직
+- CSV와 DB 저장 건수 검증
+- `main.py` 전체 실행 순서
+- 오류 발생 시 WebDriver 및 DB Engine 자원 종료
+
+로컬 테스트 실행:
+
+```bash
+python -m pytest -v
+```
+
+Ruff 코드 검사:
+
+```bash
+python -m ruff check .
+```
+
+GitHub Actions는 `main` 브랜치의 push 및 pull request 시 다음 작업을 자동으로 수행합니다.
+
+```text
+의존성 설치
+    ↓
+Ruff 코드 검사
+    ↓
+pytest 단위 테스트
+```
+
+## 15. 향후 개선
 
 현재 버전은 로컬 환경에서 실행되는 데이터 수집 파이프라인입니다.
 

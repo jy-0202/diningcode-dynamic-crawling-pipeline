@@ -1,0 +1,85 @@
+name: CI
+
+
+# ===========================================================
+# CI 실행 조건
+# ===========================================================
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+
+# ===========================================================
+# GitHub Actions 권한
+# ===========================================================
+
+permissions:
+  contents: read
+
+
+# ===========================================================
+# CI Job
+# ===========================================================
+
+jobs:
+
+  test:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # -------------------------------------------------------
+      # 1. GitHub Repository Checkout
+      # -------------------------------------------------------
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+
+      # -------------------------------------------------------
+      # 2. Python 설치
+      # -------------------------------------------------------
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+
+      # -------------------------------------------------------
+      # 3. Python Dependency 설치
+      # -------------------------------------------------------
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+
+
+      # -------------------------------------------------------
+      # 4. Ruff 코드 검사
+      # -------------------------------------------------------
+
+      - name: Run Ruff
+        run: |
+          python -m ruff check .
+
+
+      # -------------------------------------------------------
+      # 5. pytest 실행
+      # -------------------------------------------------------
+
+      - name: Run pytest
+        run: |
+          python -m pytest -v

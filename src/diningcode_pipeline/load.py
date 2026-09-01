@@ -23,7 +23,6 @@ from .database import (
     test_mysql_connection,
 )
 
-
 TABLE_NAME = "diningcode_restaurant"
 
 DB_COLUMNS = [

@@ -34,10 +34,10 @@ run_load(processed_csv_file)
 
 from pathlib import Path
 
-from sqlalchemy.exc import SQLAlchemyError
 from selenium.common.exceptions import WebDriverException
+from sqlalchemy.exc import SQLAlchemyError
 
-from src.diningcode_pipeline import run_crawling, run_preprocess, run_load
+from src.diningcode_pipeline import run_crawling, run_load, run_preprocess
 
 
 def main() -> tuple[Path, Path, dict[str, int | str]]:

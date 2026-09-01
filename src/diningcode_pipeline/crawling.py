@@ -19,7 +19,6 @@ from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
-
 from selenium import webdriver
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.chrome.options import Options
@@ -38,7 +37,6 @@ from .config import (
     TOP_MENU_COUNT,
     WAIT_TIMEOUT,
 )
-
 
 # ===========================================================
 # 1. 기본 함수
