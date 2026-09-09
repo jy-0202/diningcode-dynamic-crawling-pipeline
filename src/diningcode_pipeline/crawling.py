@@ -1,27 +1,25 @@
 """
 DiningCode 동적 크롤링 수집 모듈
 
-서울 > 강남역의 공개 맛집 정보를 Selenium으로 제한적으로 수집하고
-수집 직후 결과를 Raw CSV로 저장한다.
+서울 > 강남역의 공개 맛집 정보를 Selenium으로 제한적으로 탐색하고
+렌더링된 목록 및 상세페이지 HTML을 Raw 데이터로 저장한다.
 
 주요 흐름
 1. Chrome WebDriver 생성
 2. DiningCode 접속
 3. 서울 > 강남역 선택
 4. 최대 2회 스크롤
-5. 카테고리별 상위 5개 음식점 후보 수집
+5. 카테고리별 상위 음식점 후보 수집
 6. source_url 기준 중복 제거
-7. 상세정보 및 상위 3개 메뉴 수집
-8. Raw CSV 저장
+7. 음식점 목록 페이지 Raw HTML 저장
+8. 음식점 상세페이지 Raw HTML 저장
 """
 
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-import pandas as pd
 from selenium import webdriver
-from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
@@ -32,11 +30,9 @@ from .config import (
     MAX_RESTAURANTS_PER_CATEGORY,
     MAX_SCROLLS,
     MAX_TOTAL_RESTAURANTS,
-    RAW_DATA_DIR,
     RAW_HTML_DIR,
     TARGET_CITY,
     TARGET_REGION,
-    TOP_MENU_COUNT,
     WAIT_TIMEOUT,
 )
 
@@ -309,159 +305,8 @@ def remove_duplicate_restaurants(
 
 
 # ===========================================================
-# 5. 상세페이지 수집
+# 5. 상세페이지 Raw HTML 저장
 # ===========================================================
-
-def get_optional_text(
-    parent_element,
-    by: str,
-    selector: str,
-) -> str | None:
-    """요소가 있으면 텍스트를 반환하고 없으면 None을 반환한다."""
-    try:
-        return parent_element.find_element(
-            by,
-            selector,
-        ).text.strip()
-    except NoSuchElementException:
-        return None
-
-
-def collect_top_menus(
-    restaurant_detail_element,
-) -> list[dict]:
-    """상세페이지 최초 노출 메뉴 중 상위 3개를 수집한다."""
-    menu_items = restaurant_detail_element.find_elements(
-        By.CSS_SELECTOR,
-        'div.menu-info ul.Restaurant-MenuList li',
-    )
-
-    menu_items = menu_items[:TOP_MENU_COUNT]
-    menu_list: list[dict] = []
-
-    for menu_item in menu_items:
-        menu_name = get_optional_text(
-            menu_item,
-            By.CSS_SELECTOR,
-            'span.restaurant-menu',
-        )
-
-        menu_price = get_optional_text(
-            menu_item,
-            By.CSS_SELECTOR,
-            'p.restaurant-price',
-        )
-
-        menu_list.append(
-            {
-                'menu_name': menu_name,
-                'menu_price': menu_price,
-            }
-        )
-
-    return menu_list
-
-
-def collect_restaurant_detail(
-    driver: webdriver.Chrome,
-    wait: WebDriverWait,
-    restaurant: dict,
-) -> dict:
-    """음식점 1개의 상세정보를 수집한다."""
-    driver.get(restaurant['source_url'])
-
-    wait.until(
-        EC.presence_of_element_located(
-            (By.CSS_SELECTOR, 'div#subleft-cont')
-        )
-    )
-
-    detail_element = driver.find_element(
-        By.CSS_SELECTOR,
-        'div#subleft-cont',
-    )
-
-    restaurant_name = detail_element.find_element(
-        By.CSS_SELECTOR,
-        'h1.tit',
-    ).text.strip()
-
-    address = detail_element.find_element(
-        By.CSS_SELECTOR,
-        'div.basic-info li.locat',
-    ).text.strip().splitlines()[0]
-
-    address = address.replace(' 지번', '')
-
-    phone = get_optional_text(
-        detail_element,
-        By.CSS_SELECTOR,
-        'div.basic-info li.tel',
-    )
-
-    open_hours = get_optional_text(
-        detail_element,
-        By.CSS_SELECTOR,
-        '#today-main-hours',
-    )
-
-    tag = get_optional_text(
-        detail_element,
-        By.CSS_SELECTOR,
-        'div.basic-info li.tag',
-    )
-
-    char = get_optional_text(
-        detail_element,
-        By.CSS_SELECTOR,
-        '.basic-info li.char',
-    )
-
-    menu_list = collect_top_menus(detail_element)
-
-    return {
-        'category': restaurant['category'],
-        'restaurant_name': restaurant_name,
-        'address': address,
-        'phone': phone,
-        'open_hours': open_hours,
-        'tag': tag,
-        'char': char,
-        'image_url': restaurant['image_url'],
-        'source_url': restaurant['source_url'],
-        'menu_list': menu_list,
-    }
-
-
-def collect_restaurant_details(
-    driver: webdriver.Chrome,
-    wait: WebDriverWait,
-    unique_restaurant_list: list[dict],
-) -> list[dict]:
-    """중복 제거된 음식점 전체 상세정보를 수집한다."""
-    restaurant_result_list: list[dict] = []
-
-    for index, restaurant in enumerate(unique_restaurant_list):
-        print(
-            f'{index + 1}/{len(unique_restaurant_list)} '
-            f'{restaurant["restaurant_name"]} 수집 중'
-        )
-
-        detail = collect_restaurant_detail(
-            driver,
-            wait,
-            restaurant,
-        )
-
-        restaurant_result_list.append(detail)
-
-    print(
-        '전체 상세정보 수집 건수:',
-        len(restaurant_result_list),
-    )
-
-    return restaurant_result_list
-
 
 def save_restaurant_detail_htmls(
     driver: webdriver.Chrome,
@@ -469,7 +314,7 @@ def save_restaurant_detail_htmls(
     unique_restaurant_list: list[dict],
     batch_dir: Path,
 ) -> list[Path]:
-    """중복 제거된 음식점의 상세 HTML을 모두 저장한다."""
+    """중복 제거된 음식점의 상세페이지 HTML을 Raw 데이터로 저장한다."""
     detail_files: list[Path] = []
 
     for index, restaurant in enumerate(
@@ -521,140 +366,15 @@ def save_restaurant_detail_htmls(
 
 
 # ===========================================================
-# 6. Raw CSV 저장
-# ===========================================================
-
-def save_raw_csv(
-    restaurant_result_list: list[dict],
-) -> Path:
-    """수집 직후 데이터를 Raw CSV로 저장하고 경로를 반환한다."""
-    raw_df = pd.DataFrame(restaurant_result_list)
-
-    ensure_directory(RAW_DATA_DIR)
-
-    saved_at = datetime.now().strftime('%Y%m%d_%H%M%S')
-
-    raw_file_path = (
-        RAW_DATA_DIR
-        / f'diningcode_restaurants_raw_{saved_at}.csv'
-    )
-
-    raw_df.to_csv(
-        raw_file_path,
-        index=False,
-        encoding='utf-8-sig',
-    )
-
-    raw_load_df = pd.read_csv(
-        raw_file_path,
-        encoding='utf-8-sig',
-    )
-
-    if raw_df.shape != raw_load_df.shape:
-        raise ValueError(
-            'Raw CSV 저장 전후 데이터 크기가 다릅니다.'
-        )
-
-    print(f'Raw CSV 저장 완료: {raw_file_path}')
-    print('Raw CSV 저장 건수:', len(raw_df))
-
-    return raw_file_path
-
-
-# ===========================================================
-# 7. 대표 실행 함수
+# 6. 대표 실행 함수
 # ===========================================================
 
 def run_crawling() -> Path:
     """DiningCode 목록 및 상세페이지 Raw HTML을 수집한다."""
-    return run_full_raw_html_crawling()
-
-
-def run_raw_html_poc() -> Path:
-    """
-    DiningCode Raw HTML 저장 가능 여부를 검증한다.
-
-    목록 페이지 HTML과 음식점 상세페이지 1건의 HTML만 저장한다.
-    기존 전체 크롤링 파이프라인에는 영향을 주지 않는다.
-    """
     driver = None
 
     try:
         driver, wait = create_driver()
-
-        batch_dir = create_html_batch_directory()
-
-        # 1. DiningCode 접속 및 강남역 선택
-        open_site(driver, wait)
-        select_region(driver, wait)
-        scroll_results(driver, wait)
-
-        # 2. 동적 로딩이 완료된 목록 페이지 HTML 저장
-        list_html_file = save_raw_html(
-            html=driver.page_source,
-            batch_dir=batch_dir,
-            file_name='restaurant_list.html',
-        )
-
-        # 3. 음식점 후보 수집 및 중복 제거
-        restaurant_list = collect_restaurant_list(driver)
-
-        unique_restaurant_list = remove_duplicate_restaurants(
-            restaurant_list
-        )
-
-        if not unique_restaurant_list:
-            raise ValueError(
-                'Raw HTML POC에 사용할 음식점 후보가 없습니다.'
-            )
-
-        # 4. 첫 번째 음식점 1건만 상세페이지 접근
-        first_restaurant = unique_restaurant_list[0]
-
-        detail = collect_restaurant_detail(
-            driver,
-            wait,
-            first_restaurant,
-        )
-
-        # 5. 상세페이지 렌더링 HTML 저장
-        detail_html_file = save_raw_html(
-            html=driver.page_source,
-            batch_dir=batch_dir,
-            file_name='restaurant_detail_001.html',
-        )
-
-        print()
-        print('=' * 60)
-        print('Raw HTML POC 완료')
-        print('=' * 60)
-        print(f'배치 폴더: {batch_dir}')
-        print(f'목록 HTML: {list_html_file}')
-        print(f'상세 HTML: {detail_html_file}')
-        print(f'POC 음식점: {detail["restaurant_name"]}')
-        print(f'후보 수: {len(restaurant_list)}')
-        print(f'중복 제거 후 후보 수: {len(unique_restaurant_list)}')
-
-        return batch_dir
-
-    finally:
-        if driver is not None:
-            driver.quit()
-            print('Chrome WebDriver 종료')
-
-
-def run_full_raw_html_crawling() -> Path:
-    """
-    DiningCode 목록 및 상세페이지 전체 Raw HTML을 저장한다.
-
-    기존 Raw CSV 파이프라인을 변경하기 전
-    전체 HTML 수집 가능 여부를 검증하기 위한 실행 함수이다.
-    """
-    driver = None
-
-    try:
-        driver, wait = create_driver()
-
         batch_dir = create_html_batch_directory()
 
         # 1. 사이트 접속 및 지역 선택
@@ -669,23 +389,15 @@ def run_full_raw_html_crawling() -> Path:
             file_name='restaurant_list.html',
         )
 
-        # 3. 음식점 후보 확인
+        # 3. 음식점 후보 수집 및 중복 제거
         restaurant_list = collect_restaurant_list(driver)
-
-        unique_restaurant_list = remove_duplicate_restaurants(
-            restaurant_list
-        )
+        unique_restaurant_list = remove_duplicate_restaurants(restaurant_list)
 
         if not unique_restaurant_list:
             raise ValueError('수집할 음식점 후보가 없습니다.')
 
         # 4. 상세페이지 Raw HTML 저장
-        detail_files = save_restaurant_detail_htmls(
-            driver,
-            wait,
-            unique_restaurant_list,
-            batch_dir,
-        )
+        detail_files = save_restaurant_detail_htmls(driver, wait, unique_restaurant_list, batch_dir)
 
         print()
         print('=' * 60)
