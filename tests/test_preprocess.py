@@ -4,24 +4,26 @@ import pytest
 from src.diningcode_pipeline import preprocess
 
 
-def test_load_raw_csv_raises_file_not_found_error(tmp_path):
+def test_load_interim_csv_raises_file_not_found_error(tmp_path):
     file_path = tmp_path / 'missing.csv'
 
     with pytest.raises(FileNotFoundError):
-        preprocess.load_raw_csv(file_path)
+        preprocess.load_interim_csv(file_path)
 
 
-def test_load_raw_csv_returns_dataframe(tmp_path):
-    file_path = tmp_path / 'raw.csv'
+def test_load_interim_csv_returns_dataframe(tmp_path):
+    file_path = tmp_path / 'interim.csv'
+
     pd.DataFrame([{'name': '식당A'}]).to_csv(
         file_path,
         index=False,
         encoding='utf-8-sig',
     )
 
-    result = preprocess.load_raw_csv(file_path)
+    result = preprocess.load_interim_csv(file_path)
 
-    assert result.to_dict(orient='records') == [{'name': '식당A'}]
+    assert len(result) == 1
+    assert result.iloc[0]['name'] == '식당A'
 
 
 def test_parse_menu_list_returns_existing_list():
@@ -142,45 +144,53 @@ def test_validate_restaurant_df_returns_summary(valid_processed_df):
 def test_save_processed_csv_writes_file(tmp_path, monkeypatch, valid_processed_df):
     monkeypatch.setattr(preprocess, 'PROCESSED_DATA_DIR', tmp_path)
 
-    result = preprocess.save_processed_csv(valid_processed_df)
+    batch_id = '20260908_174901'
+    result = preprocess.save_processed_csv(valid_processed_df, batch_id)
 
-    assert result.parent == tmp_path
-    assert result.name.startswith('diningcode_restaurants_processed_')
+    expected_path = tmp_path / batch_id / 'diningcode_restaurants_processed.csv'
+
+    assert result == expected_path
+    assert result.is_file()
+
     loaded_df = pd.read_csv(result, encoding='utf-8-sig')
     assert loaded_df.shape == valid_processed_df.shape
 
 
 def test_run_preprocess_runs_load_transform_validate_and_save(monkeypatch, tmp_path):
-    raw_path = tmp_path / 'raw.csv'
+    batch_dir = tmp_path / '20260908_174901'
+    batch_dir.mkdir()
+
+    interim_path = batch_dir / 'diningcode_restaurants_parsed.csv'
     processed_path = tmp_path / 'processed.csv'
-    raw_df = pd.DataFrame([{'raw': 1}])
+
+    interim_df = pd.DataFrame([{'interim': 1}])
     transformed_df = pd.DataFrame([{'processed': 1}])
     restaurant_list = [{'source_url': 'url-1', 'category': '한식'}]
     calls = []
 
-    monkeypatch.setattr(preprocess, 'load_raw_csv', lambda path: raw_df)
+    monkeypatch.setattr(preprocess, 'load_interim_csv', lambda path: interim_df)
 
-    def fake_preprocess(raw, restaurants):
-        calls.append(('preprocess', raw, restaurants))
+    def fake_preprocess_restaurants(df, restaurants):
+        calls.append(('preprocess', df, restaurants))
         return transformed_df
 
     def fake_validate(df):
         calls.append(('validate', df))
         return {'row_count': 1}
 
-    def fake_save(df):
-        calls.append(('save', df))
+    def fake_save(df, batch_id):
+        calls.append(('save', df, batch_id))
         return processed_path
 
-    monkeypatch.setattr(preprocess, 'preprocess_restaurants', fake_preprocess)
+    monkeypatch.setattr(preprocess, 'preprocess_restaurants', fake_preprocess_restaurants)
     monkeypatch.setattr(preprocess, 'validate_restaurant_df', fake_validate)
     monkeypatch.setattr(preprocess, 'save_processed_csv', fake_save)
 
-    result = preprocess.run_preprocess(raw_path, restaurant_list)
+    result = preprocess.run_preprocess(interim_path, restaurant_list)
 
     assert result == processed_path
     assert calls == [
-        ('preprocess', raw_df, restaurant_list),
+        ('preprocess', interim_df, restaurant_list),
         ('validate', transformed_df),
-        ('save', transformed_df),
+        ('save', transformed_df, '20260908_174901'),
     ]

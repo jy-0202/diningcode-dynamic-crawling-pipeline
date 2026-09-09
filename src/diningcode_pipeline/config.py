@@ -14,7 +14,10 @@ from pathlib import Path
 PROJECT_DIR = Path(__file__).resolve().parents[2]
 
 DATA_DIR = PROJECT_DIR / 'data'
+
 RAW_DATA_DIR = DATA_DIR / 'raw'
+RAW_HTML_DIR = RAW_DATA_DIR / 'html'
+INTERIM_DATA_DIR = DATA_DIR / 'interim'
 PROCESSED_DATA_DIR = DATA_DIR / 'processed'
 
 ENV_FILE = PROJECT_DIR / '.env'

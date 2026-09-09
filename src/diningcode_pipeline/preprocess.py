@@ -1,7 +1,7 @@
 """
-DiningCode Raw CSV 전처리 모듈
+DiningCode Interim CSV 전처리 모듈
 
-Raw CSV를 읽어 다음 작업을 수행한다.
+Extract 단계에서 생성한 Interim CSV를 읽어 다음 작업을 수행한다.
 
 1. tag + char → feature 통합
 2. 상위 3개 메뉴 컬럼 분리
@@ -47,17 +47,12 @@ def ensure_directory(directory: Path) -> Path:
     return directory
 
 
-def load_raw_csv(file_path: Path) -> pd.DataFrame:
-    """Raw CSV를 DataFrame으로 읽는다."""
+def load_interim_csv(file_path: Path) -> pd.DataFrame:
+    """Interim CSV를 DataFrame으로 읽는다."""
     if not file_path.is_file():
-        raise FileNotFoundError(
-            f"Raw CSV 파일이 없습니다. {file_path}"
-        )
+        raise FileNotFoundError(f'Interim CSV 파일이 없습니다. {file_path}')
 
-    return pd.read_csv(
-        file_path,
-        encoding='utf-8-sig',
-    )
+    return pd.read_csv(file_path, encoding='utf-8-sig')
 
 
 def parse_menu_list(value: object) -> list[dict]:
@@ -96,16 +91,13 @@ def build_restaurant_categories(
 
 
 def preprocess_restaurants(
-    raw_df: pd.DataFrame,
+    interim_df: pd.DataFrame,
     restaurant_list: list[dict],
 ) -> pd.DataFrame:
-    """Raw DataFrame을 최종 DB 적재 구조로 전처리한다."""
-    restaurant_df = raw_df.copy()
+    """Interim DataFrame을 최종 DB 적재 구조로 전처리한다."""
+    restaurant_df = interim_df.copy()
 
-    restaurant_df['menu_list'] = (
-        restaurant_df['menu_list']
-        .map(parse_menu_list)
-    )
+    restaurant_df['menu_list'] = restaurant_df['menu_list'].map(parse_menu_list)
 
     feature_list: list[str | None] = []
 
@@ -267,73 +259,52 @@ def validate_restaurant_df(
 
 def save_processed_csv(
     restaurant_df: pd.DataFrame,
+    batch_id: str,
 ) -> Path:
-    """전처리 결과를 Processed CSV로 저장하고 경로를 반환한다."""
-    ensure_directory(PROCESSED_DATA_DIR)
+    """전처리한 DataFrame을 batch_id별 Processed CSV로 저장한다."""
+    batch_dir = PROCESSED_DATA_DIR / batch_id
+    batch_dir.mkdir(parents=True, exist_ok=True)
 
-    saved_at = datetime.now().strftime('%Y%m%d_%H%M%S')
-
-    processed_file_path = (
-        PROCESSED_DATA_DIR
-        / (
-            "diningcode_restaurants_processed_"
-            f"{saved_at}.csv"
-        )
-    )
+    file_path = batch_dir / 'diningcode_restaurants_processed.csv'
 
     restaurant_df.to_csv(
-        processed_file_path,
+        file_path,
         index=False,
-        encoding="utf-8-sig",
-    )
-
-    processed_load_df = pd.read_csv(
-        processed_file_path,
         encoding='utf-8-sig',
     )
 
-    if restaurant_df.shape != processed_load_df.shape:
-        raise ValueError(
-            "Processed CSV 저장 전후 데이터 크기가 다릅니다."
-        )
+    loaded_df = pd.read_csv(file_path, encoding='utf-8-sig')
 
-    print(
-        f'Processed CSV 저장 완료: '
-        f'{processed_file_path}'
-    )
+    if restaurant_df.shape != loaded_df.shape:
+        raise ValueError('Processed CSV 저장 전후 데이터 크기가 다릅니다.')
 
-    return processed_file_path
+    print(f'Processed CSV 저장 완료: {file_path}')
+    print(f'Processed CSV 저장 건수: {len(restaurant_df)}')
+
+    return file_path
 
 
 def run_preprocess(
-    raw_csv_file: Path,
+    interim_csv_file: Path,
     restaurant_list: list[dict],
 ) -> Path:
     """
-    Raw CSV를 읽어 전처리, 검증, Processed CSV 저장을 수행한다.
-
-    Returns:
-        저장된 Processed CSV 파일 경로
+    Interim CSV를 읽어 전처리, 검증, Processed CSV 저장을 수행한다.
     """
-    raw_df = load_raw_csv(raw_csv_file)
+    interim_df = load_interim_csv(interim_csv_file)
 
     restaurant_df = preprocess_restaurants(
-        raw_df,
+        interim_df,
         restaurant_list,
     )
 
-    summary = validate_restaurant_df(
-        restaurant_df
-    )
+    summary = validate_restaurant_df(restaurant_df)
 
-    print(
-        '전처리 검증 결과:',
-        summary,
-    )
+    print('전처리 검증 결과:', summary)
 
-    return save_processed_csv(
-        restaurant_df
-    )
+    batch_id = interim_csv_file.parent.name
+
+    return save_processed_csv(restaurant_df, batch_id)
 
 
 if __name__ == "__main__":

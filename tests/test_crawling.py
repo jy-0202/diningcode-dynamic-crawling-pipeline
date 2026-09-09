@@ -141,57 +141,29 @@ def test_save_raw_csv_writes_and_reads_same_shape(tmp_path, monkeypatch):
     assert saved_df.shape == (1, 10)
 
 
-def test_run_crawling_calls_pipeline_and_quits_driver(monkeypatch, tmp_path):
-    class FakeDriver:
-        def __init__(self):
-            self.quit_called = False
+def test_run_crawling_returns_raw_batch_dir(monkeypatch, tmp_path):
+    batch_dir = tmp_path / '20260908_174901'
 
-        def quit(self):
-            self.quit_called = True
+    monkeypatch.setattr(
+        crawling,
+        'run_full_raw_html_crawling',
+        lambda: batch_dir,
+    )
 
-    driver = FakeDriver()
-    wait = object()
-    restaurants = [{'restaurant_name': 'A', 'source_url': 'url-1'}]
-    raw_path = tmp_path / 'raw.csv'
+    result = crawling.run_crawling()
 
-    monkeypatch.setattr(crawling, 'create_driver', lambda: (driver, wait))
-    monkeypatch.setattr(crawling, 'open_site', lambda d, w: None)
-    monkeypatch.setattr(crawling, 'select_region', lambda d, w: None)
-    monkeypatch.setattr(crawling, 'scroll_results', lambda d, w: None)
-    monkeypatch.setattr(crawling, 'collect_restaurant_list', lambda d: restaurants)
-    monkeypatch.setattr(crawling, 'remove_duplicate_restaurants', lambda items: items)
-    monkeypatch.setattr(crawling, 'collect_restaurant_details', lambda d, w, items: items)
-    monkeypatch.setattr(crawling, 'save_raw_csv', lambda items: raw_path)
-
-    result_path, result_restaurants = crawling.run_crawling()
-
-    assert result_path == raw_path
-    assert result_restaurants == restaurants
-    assert driver.quit_called is True
+    assert result == batch_dir
 
 
-def test_run_crawling_quits_driver_when_collection_fails(monkeypatch):
-    class FakeDriver:
-        def __init__(self):
-            self.quit_called = False
-
-        def quit(self):
-            self.quit_called = True
-
-    driver = FakeDriver()
-    wait = object()
-
-    monkeypatch.setattr(crawling, 'create_driver', lambda: (driver, wait))
-    monkeypatch.setattr(crawling, 'open_site', lambda d, w: None)
-    monkeypatch.setattr(crawling, 'select_region', lambda d, w: None)
-    monkeypatch.setattr(crawling, 'scroll_results', lambda d, w: None)
-
-    def raise_error(driver):
+def test_run_crawling_propagates_error(monkeypatch):
+    def raise_error():
         raise ValueError('수집 실패')
 
-    monkeypatch.setattr(crawling, 'collect_restaurant_list', raise_error)
+    monkeypatch.setattr(
+        crawling,
+        'run_full_raw_html_crawling',
+        raise_error,
+    )
 
     with pytest.raises(ValueError, match='수집 실패'):
         crawling.run_crawling()
-
-    assert driver.quit_called is True
