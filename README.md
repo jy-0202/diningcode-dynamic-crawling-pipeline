@@ -1,7 +1,7 @@
 # DiningCode Dynamic Crawling Pipeline
 
 Selenium을 활용해 DiningCode의 동적 페이지에서 음식점 정보를 제한적으로 수집하고,  
-Raw CSV 저장 → 전처리 및 검증 → Processed CSV 저장 → MySQL UPSERT까지 수행하는  
+Raw HTML 저장 → 데이터 추출 및 Interim CSV 저장 → 전처리 및 검증 → Processed CSV 저장 → MySQL UPSERT까지 수행하는  
 개인 데이터 수집 파이프라인 프로젝트입니다.
 
 ## 1. 프로젝트 목적
@@ -9,8 +9,8 @@ Raw CSV 저장 → 전처리 및 검증 → Processed CSV 저장 → MySQL UPSER
 동적 웹페이지를 대상으로 다음 과정을 하나의 로컬 데이터 파이프라인으로 구성하는 것을 목표로 합니다.
 
 - Selenium을 이용한 동적 크롤링
-- 원본 수집 데이터와 전처리 데이터 분리
-- 데이터 정제 및 품질 검증
+- Raw / Interim / Processed 데이터 계층 분리
+- 데이터 추출, 정제 및 품질 검증
 - MySQL 저장
 - PK / UNIQUE 제약을 이용한 UPSERT
 - pytest 기반 단위 테스트
@@ -34,11 +34,18 @@ DiningCode
     ↓
 Selenium 동적 크롤링
     ↓
-data/raw/
+Raw HTML
+data/raw/html/{batch_id}/
+    ↓
+BeautifulSoup 데이터 추출
+    ↓
+Interim CSV
+data/interim/{batch_id}/
     ↓
 전처리 및 데이터 검증
     ↓
-data/processed/
+Processed CSV
+data/processed/{batch_id}/
     ↓
 MySQL UPSERT
 ```
@@ -47,6 +54,8 @@ MySQL UPSERT
 
 ```text
 run_crawling()
+    ↓
+run_extract()
     ↓
 run_preprocess()
     ↓
@@ -75,15 +84,27 @@ run_load()
 - 제한된 횟수만큼 결과 페이지 스크롤
 - 카테고리별 상위 음식점 후보 수집
 - `source_url` 기준 중복 제거
-- 음식점 상세정보 수집
-- 상위 3개 메뉴 수집
-- Raw CSV 저장
+- 목록 페이지 Raw HTML 저장
+- 음식점별 상세페이지 Raw HTML 저장
+
+### Extract
+
+`src/diningcode_pipeline/extract.py`
+
+- Raw HTML 로드
+- 음식점 후보 목록 파싱
+- `source_url` 기준 중복 제거
+- 음식점 상세정보 파싱
+- 주소, 전화번호, 영업시간, 특징 데이터 추출
+- 상위 3개 메뉴 추출
+- batch_id별 Interim CSV 저장
+- Interim CSV 저장 전후 데이터 크기 검증
 
 ### Preprocess
 
 `src/diningcode_pipeline/preprocess.py`
 
-- Raw CSV 로드
+- Interim CSV 로드
 - `tag`, `char` 데이터를 `feature`로 통합
 - 메뉴 데이터를 `menu_1 ~ menu_3` 컬럼으로 분리
 - 음식점별 복수 카테고리 통합
@@ -150,18 +171,22 @@ run_load()
 │       ├── __init__.py
 │       ├── config.py
 │       ├── crawling.py
+│       ├── extract.py
 │       ├── database.py
 │       ├── preprocess.py
 │       └── load.py
 ├── tests/
 │   ├── conftest.py
 │   ├── test_crawling.py
+│   ├── test_extract.py
 │   ├── test_database.py
 │   ├── test_load.py
 │   ├── test_main.py
 │   └── test_preprocess.py
-├── data/                         # 파이프라인 실행 시 생성
+├── data/
 │   ├── raw/
+│   │   └── html/
+│   ├── interim/
 │   └── processed/
 ├── .env.example
 ├── .gitignore
@@ -172,8 +197,8 @@ run_load()
 └── requirements.txt
 ```
 
-`data/raw`, `data/processed` 디렉터리는 파이프라인 실행 시 자동으로 생성되며,  
-생성된 CSV 파일과 실제 DB 접속 정보가 들어 있는 `.env` 파일은 Git에 포함하지 않습니다.
+`data/raw/html`, `data/interim`, `data/processed` 디렉터리는 파이프라인 실행 시 사용되며,
+생성된 Raw HTML과 CSV 파일, 실제 DB 접속 정보가 들어 있는 `.env` 파일은 Git에 포함하지 않습니다.
 
 ## 7. 실행 환경
 
@@ -185,6 +210,7 @@ run_load()
 
 - pandas
 - Selenium
+- beautifulsoup4
 - SQLAlchemy
 - PyMySQL
 - python-dotenv
@@ -253,11 +279,12 @@ python main.py
 
 ```text
 1. Selenium 동적 크롤링
-2. Raw CSV 저장
-3. 전처리 및 검증
-4. Processed CSV 저장
-5. MySQL UPSERT
-6. CSV / DB 저장 건수 검증
+2. Raw HTML 저장
+3. Raw HTML 데이터 추출
+4. Interim CSV 저장
+5. 전처리 및 검증
+6. Processed CSV 저장
+7. MySQL UPSERT 및 저장 건수 검증
 ```
 
 ## 11. 데이터 저장 구조
@@ -265,20 +292,31 @@ python main.py
 ### Raw
 
 ```text
-data/raw/
-└── diningcode_restaurants_raw_YYYYMMDD_HHMMSS.csv
+data/raw/html/{batch_id}/
+├── restaurant_list.html
+├── restaurant_detail_{rid}.html
+└── ...
 ```
 
-크롤링 직후 데이터를 저장합니다.
+Selenium으로 렌더링된 목록 및 상세페이지 HTML을 원본 데이터로 저장합니다.
+
+### Interim
+
+```text
+data/interim/{batch_id}/
+└── diningcode_restaurants_parsed.csv
+```
+
+Raw HTML에서 음식점 정보를 추출한 중간 데이터를 저장합니다.
 
 ### Processed
 
 ```text
-data/processed/
-└── diningcode_restaurants_processed_YYYYMMDD_HHMMSS.csv
+data/processed/{batch_id}/
+└── diningcode_restaurants_processed.csv
 ```
 
-전처리 및 검증이 완료된 최종 데이터를 저장합니다.
+전처리 및 데이터 품질 검증이 완료된 최종 데이터를 저장합니다.
 
 ## 12. 데이터 품질 검증
 
@@ -288,7 +326,7 @@ data/processed/
 - 필수값 결측 여부
 - `restaurant_id` 중복 여부
 - `source_url` 중복 여부
-- CSV 저장 전후 데이터 크기
+- Interim / Processed CSV 저장 전후 데이터 크기
 - Processed CSV와 MySQL 저장 건수 비교
 
 ## 13. MySQL 적재 방식
@@ -303,19 +341,21 @@ data/processed/
 
 외부 사이트나 실제 MySQL에 의존하지 않도록 단위 테스트에서는 pytest의 `monkeypatch`, 임시 경로, Fake 객체를 활용합니다.
 
-현재 총 51개의 단위 테스트로 다음 내용을 검증합니다.
+pytest 기반 단위 테스트로 다음 내용을 검증합니다.
 
 - 크롤링 보조 함수와 `source_url` 중복 제거
-- 선택 요소 및 메뉴 데이터 처리
-- Raw / Processed CSV 저장
+- Raw HTML 수집 및 WebDriver 종료 처리
+- Raw HTML 파일 로드 및 음식점 목록 파싱
+- 음식점 상세정보 및 상위 메뉴 데이터 추출
+- Interim CSV 저장 및 데이터 크기 검증
 - 메뉴 문자열 파싱과 카테고리 통합
-- 전처리 결과 필수값 및 중복 검증
+- Processed CSV 저장 및 데이터 품질 검증
 - `.env` 기반 DB 설정 검증
 - SQLAlchemy Engine 생성 설정
 - DB 저장용 DataFrame과 Python 레코드 변환
 - CREATE TABLE / UPSERT 호출 로직
-- CSV와 DB 저장 건수 검증
-- `main.py` 전체 실행 순서
+- Processed CSV와 MySQL 저장 건수 검증
+- `main.py`의 Crawling → Extract → Preprocess → Load 실행 순서
 - 오류 발생 시 WebDriver 및 DB Engine 자원 종료
 
 로컬 테스트 실행:
