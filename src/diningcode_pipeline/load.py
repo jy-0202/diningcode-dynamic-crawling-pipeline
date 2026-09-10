@@ -190,11 +190,7 @@ def prepare_database_dataframe(
 
     database_df = df[DB_COLUMNS].copy()
 
-    string_columns = [
-        column
-        for column in DB_COLUMNS
-        if column != 'collected_at'
-    ]
+    string_columns = [column for column in DB_COLUMNS if column != 'collected_at']
 
     for column in string_columns:
         database_df[column] = (
@@ -214,9 +210,7 @@ def prepare_database_dataframe(
         .isna()
         .sum()
     )
-    invalid_nulls = null_counts[
-        null_counts > 0
-    ]
+    invalid_nulls = null_counts[null_counts > 0]
 
     if not invalid_nulls.empty:
         raise ValueError(
@@ -271,9 +265,7 @@ def create_table(
 ) -> None:
     """diningcode_restaurant 테이블이 없으면 생성한다."""
     with engine.begin() as connection:
-        connection.execute(
-            CREATE_TABLE_SQL
-        )
+        connection.execute(CREATE_TABLE_SQL)
 
 
 def upsert_restaurants(
@@ -295,22 +287,32 @@ def upsert_restaurants(
 
 def validate_database(
     engine: Engine,
-    processed_count: int,
+    restaurant_ids: list[str],
 ) -> dict[str, int | str]:
-    """DB 건수와 샘플 데이터를 확인한다."""
+    """이번 배치 데이터의 DB 반영 여부와 전체 DB 건수를 확인한다."""
+    processed_count = len(restaurant_ids)
+
     with engine.connect() as connection:
         db_count = connection.execute(
-            text(
-                'SELECT COUNT(*) '
-                'FROM diningcode_restaurant'
-            )
+            text('SELECT COUNT(*) FROM diningcode_restaurant')
         ).scalar_one()
 
-    status = (
-        '일치'
-        if processed_count == db_count
-        else '불일치'
-    )
+        if restaurant_ids:
+            params = {f'id_{index}': restaurant_id for index, restaurant_id in enumerate(restaurant_ids)}
+            placeholders = ', '.join(f':id_{index}' for index in range(processed_count))
+
+            loaded_count = connection.execute(
+                text(
+                    'SELECT COUNT(*) '
+                    'FROM diningcode_restaurant '
+                    f'WHERE restaurant_id IN ({placeholders})'
+                ),
+                params,
+            ).scalar_one()
+        else:
+            loaded_count = 0
+
+    status = '일치' if processed_count == loaded_count else '불일치'
 
     sample_df = pd.read_sql(
         text(
@@ -335,6 +337,7 @@ def validate_database(
 
     return {
         'processed_count': processed_count,
+        'loaded_count': loaded_count,
         'db_count': db_count,
         'count_status': status,
     }
@@ -347,52 +350,31 @@ def run_load(
     Processed CSV를 MySQL에 UPSERT하고 저장 결과를 검증한다.
 
     Returns:
-        Processed CSV 건수, DB 건수, 건수 비교 결과
+        이번 배치 건수, DB 반영 건수, 전체 DB 건수, 건수 비교 결과
     """
-    processed_df = load_processed_csv(
-        processed_csv_file
-    )
+    processed_df = load_processed_csv(processed_csv_file)
 
-    database_df = prepare_database_dataframe(
-        processed_df
-    )
+    database_df = prepare_database_dataframe(processed_df)
 
-    records = dataframe_to_database_records(
-        database_df
-    )
+    records = dataframe_to_database_records(database_df)
 
     config = load_database_config()
 
-    create_database_if_not_exists(
-        config
-    )
+    create_database_if_not_exists(config)
 
-    engine = create_mysql_engine(
-        config
-    )
+    engine = create_mysql_engine(config)
 
     try:
-        test_mysql_connection(
-            engine
-        )
+        test_mysql_connection(engine)
 
-        create_table(
-            engine
-        )
+        create_table(engine)
 
-        upsert_restaurants(
-            engine,
-            records,
-        )
+        upsert_restaurants(engine, records)
 
-        summary = validate_database(
-            engine,
-            processed_count=len(database_df),
-        )
+        restaurant_ids = database_df['restaurant_id'].astype(str).tolist()
+        summary = validate_database(engine, restaurant_ids)
 
-        print(
-            f'MySQL 저장 결과: {summary}'
-        )
+        print(f'MySQL 저장 결과: {summary}')
 
         return summary
 

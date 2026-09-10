@@ -145,21 +145,22 @@ def test_create_table_executes_create_table_sql():
 
 
 @pytest.mark.parametrize(
-    ('processed_count', 'db_count', 'expected_status'),
+    ('restaurant_ids', 'db_count', 'loaded_count', 'expected_status'),
     [
-        (3, 3, '일치'),
-        (3, 4, '불일치'),
+        (['id1', 'id2', 'id3'], 3, 3, '일치'),
+        (['id1', 'id2', 'id3'], 4, 3, '일치'),
+        (['id1', 'id2', 'id3'], 4, 2, '불일치'),
     ],
 )
 def test_validate_database_returns_count_status(
-    monkeypatch,
-    processed_count,
-    db_count,
-    expected_status,
+    monkeypatch, restaurant_ids, db_count, loaded_count, expected_status
 ):
-    class FakeScalarResult:
+    class FakeResult:
+        def __init__(self, value):
+            self.value = value
+
         def scalar_one(self):
-            return db_count
+            return self.value
 
     class FakeConnection:
         def __enter__(self):
@@ -168,8 +169,13 @@ def test_validate_database_returns_count_status(
         def __exit__(self, exc_type, exc_value, traceback):
             return False
 
-        def execute(self, statement):
-            return FakeScalarResult()
+        def execute(self, statement, params=None):
+            sql = str(statement)
+
+            if 'WHERE restaurant_id IN' in sql:
+                return FakeResult(loaded_count)
+
+            return FakeResult(db_count)
 
     class FakeEngine:
         def connect(self):
@@ -178,13 +184,14 @@ def test_validate_database_returns_count_status(
     monkeypatch.setattr(
         load.pd,
         'read_sql',
-        lambda statement, engine: pd.DataFrame([{'restaurant_id': '1001'}]),
+        lambda *args, **kwargs: load.pd.DataFrame(),
     )
 
-    result = load.validate_database(FakeEngine(), processed_count)
+    result = load.validate_database(FakeEngine(), restaurant_ids)
 
     assert result == {
-        'processed_count': processed_count,
+        'processed_count': 3,
+        'loaded_count': loaded_count,
         'db_count': db_count,
         'count_status': expected_status,
     }
