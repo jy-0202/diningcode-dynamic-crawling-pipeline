@@ -92,9 +92,11 @@ def create_driver() -> tuple[webdriver.Chrome, WebDriverWait]:
 
     if os.getenv('GITHUB_ACTIONS') == 'true':
         options.add_argument('--headless=new')
-        options.add_argument('--no-sandbox')
-        options.add_argument('--disable-dev-shm-usage')
         options.add_argument('--window-size=1920,1080')
+
+        if os.name != 'nt':
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
     else:
         options.add_argument('--start-maximized')
 
