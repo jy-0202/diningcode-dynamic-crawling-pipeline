@@ -32,31 +32,20 @@ REQUIRED_ENV_NAMES = {
 # 2. 데이터베이스 연결 설정
 # ===========================================================
 
-def load_database_config(
-    env_file: Path = ENV_FILE,
-) -> dict[str, str | int]:
+def load_database_config(env_file: Path = ENV_FILE) -> dict[str, str | int]:
     """MySQL 환경변수를 읽고 검증한다."""
     if env_file.is_file():
         load_dotenv(dotenv_path=env_file)
 
-    missing_names = [
-        name
-        for name in REQUIRED_ENV_NAMES
-        if not os.environ.get(name)
-    ]
+    missing_names = [name for name in REQUIRED_ENV_NAMES if not os.environ.get(name)]
 
     if missing_names:
-        raise ValueError(
-            f'필수 환경 변수가 없습니다. '
-            f'{sorted(missing_names)}'
-        )
+        raise ValueError(f'필수 환경 변수가 없습니다. {sorted(missing_names)}')
 
     try:
         port = int(os.environ['DB_PORT'])
     except ValueError as error:
-        raise ValueError(
-            'DB_PORT는 정수여야 합니다.'
-        ) from error
+        raise ValueError('DB_PORT는 정수여야 합니다.') from error
 
     return {
         'host': os.environ['DB_HOST'],
@@ -67,9 +56,7 @@ def load_database_config(
     }
 
 
-def create_database_if_not_exists(
-    config: dict[str, str | int],
-) -> None:
+def create_database_if_not_exists(config: dict[str, str | int]) -> None:
     """MySQL 서버에 크롤링 전용 DB가 없으면 생성한다."""
     server_url = URL.create(
         drivername='mysql+pymysql',
@@ -79,7 +66,6 @@ def create_database_if_not_exists(
         port=int(config['port']),
         query={'charset': 'utf8mb4'},
     )
-
     server_engine = create_engine(server_url)
 
     try:
@@ -98,9 +84,7 @@ def create_database_if_not_exists(
         server_engine.dispose()
 
 
-def create_mysql_engine(
-    config: dict[str, str | int],
-) -> Engine:
+def create_mysql_engine(config: dict[str, str | int]) -> Engine:
     """크롤링 전용 DB용 SQLAlchemy Engine을 생성한다."""
     database_url = URL.create(
         drivername='mysql+pymysql',
@@ -115,16 +99,8 @@ def create_mysql_engine(
     return create_engine(database_url)
 
 
-def test_mysql_connection(
-    engine: Engine,
-) -> None:
+def test_mysql_connection(engine: Engine) -> None:
     """MySQL 연결을 확인한다."""
     with engine.connect() as connection:
-        result = connection.execute(
-            text('SELECT 1')
-        )
-
-        print(
-            'MySQL 연결 확인:',
-            result.scalar(),
-        )
+        result = connection.execute(text('SELECT 1'))
+        print('MySQL 연결 확인:', result.scalar())

@@ -22,22 +22,22 @@ import pandas as pd
 from .config import PROCESSED_DATA_DIR
 
 FINAL_COLUMNS = [
-    "restaurant_id",
-    "restaurant_name",
-    "categories",
-    "address",
-    "phone",
-    "open_hours",
-    "feature",
-    "image_url",
-    "menu_1_name",
-    "menu_1_price",
-    "menu_2_name",
-    "menu_2_price",
-    "menu_3_name",
-    "menu_3_price",
-    "source_url",
-    "collected_at",
+    'restaurant_id',
+    'restaurant_name',
+    'categories',
+    'address',
+    'phone',
+    'open_hours',
+    'feature',
+    'image_url',
+    'menu_1_name',
+    'menu_1_price',
+    'menu_2_name',
+    'menu_2_price',
+    'menu_3_name',
+    'menu_3_price',
+    'source_url',
+    'collected_at',
 ]
 
 
@@ -66,9 +66,7 @@ def parse_menu_list(value: object) -> list[dict]:
     return ast.literal_eval(str(value))
 
 
-def build_restaurant_categories(
-    restaurant_list: list[dict],
-) -> dict[str, str]:
+def build_restaurant_categories(restaurant_list: list[dict]) -> dict[str, str]:
     """중복 제거 전 후보 목록으로 음식점별 복수 categories를 통합한다."""
     restaurant_categories = {}
 
@@ -83,9 +81,7 @@ def build_restaurant_categories(
             restaurant_categories[source_url].append(category)
 
     for source_url in restaurant_categories:
-        restaurant_categories[source_url] = ', '.join(
-            restaurant_categories[source_url]
-        )
+        restaurant_categories[source_url] = ', '.join(restaurant_categories[source_url])
 
     return restaurant_categories
 
@@ -96,20 +92,19 @@ def preprocess_restaurants(
 ) -> pd.DataFrame:
     """Interim DataFrame을 최종 DB 적재 구조로 전처리한다."""
     restaurant_df = interim_df.copy()
-
     restaurant_df['menu_list'] = restaurant_df['menu_list'].map(parse_menu_list)
 
     feature_list: list[str | None] = []
 
     for index in restaurant_df.index:
-        tag = restaurant_df.loc[index, "tag"]
-        char = restaurant_df.loc[index, "char"]
+        tag = restaurant_df.loc[index, 'tag']
+        char = restaurant_df.loc[index, 'char']
 
         tag = None if pd.isna(tag) else str(tag).strip()
         char = None if pd.isna(char) else str(char).strip()
 
         if tag and char:
-            feature = tag + ", " + char
+            feature = tag + ', ' + char
         elif tag:
             feature = tag
         elif char:
@@ -119,159 +114,87 @@ def preprocess_restaurants(
 
         feature_list.append(feature)
 
-    restaurant_df["feature"] = feature_list
+    restaurant_df['feature'] = feature_list
 
     for menu_number in range(1, 4):
-        restaurant_df[f"menu_{menu_number}_name"] = None
-        restaurant_df[f"menu_{menu_number}_price"] = None
+        restaurant_df[f'menu_{menu_number}_name'] = None
+        restaurant_df[f'menu_{menu_number}_price'] = None
 
     for index in restaurant_df.index:
         menu_list = restaurant_df.loc[index, 'menu_list']
 
         if len(menu_list) >= 1:
-            restaurant_df.loc[index, 'menu_1_name'] = (
-                menu_list[0]['menu_name']
-            )
-            restaurant_df.loc[index, 'menu_1_price'] = (
-                menu_list[0]['menu_price']
-            )
+            restaurant_df.loc[index, 'menu_1_name'] = menu_list[0]['menu_name']
+            restaurant_df.loc[index, 'menu_1_price'] = menu_list[0]['menu_price']
 
         if len(menu_list) >= 2:
-            restaurant_df.loc[index, 'menu_2_name'] = (
-                menu_list[1]['menu_name']
-            )
-            restaurant_df.loc[index, 'menu_2_price'] = (
-                menu_list[1]['menu_price']
-            )
+            restaurant_df.loc[index, 'menu_2_name'] = menu_list[1]['menu_name']
+            restaurant_df.loc[index, 'menu_2_price'] = menu_list[1]['menu_price']
 
         if len(menu_list) >= 3:
-            restaurant_df.loc[index, 'menu_3_name'] = (
-                menu_list[2]['menu_name']
-            )
-            restaurant_df.loc[index, 'menu_3_price'] = (
-                menu_list[2]['menu_price']
-            )
+            restaurant_df.loc[index, 'menu_3_name'] = menu_list[2]['menu_name']
+            restaurant_df.loc[index, 'menu_3_price'] = menu_list[2]['menu_price']
 
-    restaurant_categories = build_restaurant_categories(
-        restaurant_list
-    )
+    restaurant_categories = build_restaurant_categories(restaurant_list)
+    restaurant_df['categories'] = restaurant_df['source_url'].map(restaurant_categories)
 
-    restaurant_df['categories'] = (
-        restaurant_df['source_url']
-        .map(restaurant_categories)
-    )
-
-    restaurant_df = restaurant_df.drop(
-        columns=[
-            'category',
-            'tag',
-            'char',
-            'menu_list',
-        ]
-    )
-
-    restaurant_df["restaurant_id"] = (
-        restaurant_df["source_url"]
-        .str.split("rid=")
-        .str[-1]
-    )
-
+    restaurant_df = restaurant_df.drop(columns=['category', 'tag', 'char', 'menu_list'])
+    restaurant_df['restaurant_id'] = restaurant_df['source_url'].str.split('rid=').str[-1]
     restaurant_df['collected_at'] = datetime.now()
-
     restaurant_df = restaurant_df.replace('', pd.NA)
 
     return restaurant_df[FINAL_COLUMNS]
 
 
-def validate_restaurant_df(
-    restaurant_df: pd.DataFrame,
-) -> dict[str, int]:
+def validate_restaurant_df(restaurant_df: pd.DataFrame) -> dict[str, int]:
     """전처리 결과의 필수 컬럼, 중복, 결측값을 검증한다."""
     if restaurant_df.empty:
-        raise ValueError(
-            "전처리 결과 DataFrame이 비어 있습니다."
-        )
+        raise ValueError('전처리 결과 DataFrame이 비어 있습니다.')
 
-    missing_columns = (
-        set(FINAL_COLUMNS)
-        - set(restaurant_df.columns)
-    )
+    missing_columns = set(FINAL_COLUMNS) - set(restaurant_df.columns)
 
     if missing_columns:
-        raise ValueError(
-            f"필수 컬럼이 누락되었습니다. "
-            f"{sorted(missing_columns)}"
-        )
+        raise ValueError(f'필수 컬럼이 누락되었습니다. {sorted(missing_columns)}')
 
     required_columns = [
-        "restaurant_id",
-        "restaurant_name",
-        "categories",
-        "address",
-        "source_url",
-        "collected_at",
+        'restaurant_id',
+        'restaurant_name',
+        'categories',
+        'address',
+        'source_url',
+        'collected_at',
     ]
 
-    null_counts = (
-        restaurant_df[required_columns]
-        .isna()
-        .sum()
-    )
-    invalid_nulls = null_counts[
-        null_counts > 0
-    ]
+    null_counts = restaurant_df[required_columns].isna().sum()
+    invalid_nulls = null_counts[null_counts > 0]
 
     if not invalid_nulls.empty:
-        raise ValueError(
-            "필수 데이터에 결측값이 있습니다.\n"
-            + invalid_nulls.to_string()
-        )
+        raise ValueError('필수 데이터에 결측값이 있습니다.\n' + invalid_nulls.to_string())
 
-    restaurant_id_duplicates = int(
-        restaurant_df["restaurant_id"]
-        .duplicated()
-        .sum()
-    )
-
-    source_url_duplicates = int(
-        restaurant_df["source_url"]
-        .duplicated()
-        .sum()
-    )
+    restaurant_id_duplicates = int(restaurant_df['restaurant_id'].duplicated().sum())
+    source_url_duplicates = int(restaurant_df['source_url'].duplicated().sum())
 
     if restaurant_id_duplicates:
-        raise ValueError(
-            "중복된 restaurant_id가 존재합니다."
-        )
+        raise ValueError('중복된 restaurant_id가 존재합니다.')
 
     if source_url_duplicates:
-        raise ValueError(
-            "중복된 source_url이 존재합니다."
-        )
+        raise ValueError('중복된 source_url이 존재합니다.')
 
     return {
-        "row_count": len(restaurant_df),
-        "column_count": len(restaurant_df.columns),
-        "restaurant_id_duplicates": restaurant_id_duplicates,
-        "source_url_duplicates": source_url_duplicates,
+        'row_count': len(restaurant_df),
+        'column_count': len(restaurant_df.columns),
+        'restaurant_id_duplicates': restaurant_id_duplicates,
+        'source_url_duplicates': source_url_duplicates,
     }
 
 
-def save_processed_csv(
-    restaurant_df: pd.DataFrame,
-    batch_id: str,
-) -> Path:
+def save_processed_csv(restaurant_df: pd.DataFrame, batch_id: str) -> Path:
     """전처리한 DataFrame을 batch_id별 Processed CSV로 저장한다."""
     batch_dir = PROCESSED_DATA_DIR / batch_id
     batch_dir.mkdir(parents=True, exist_ok=True)
 
     file_path = batch_dir / 'diningcode_restaurants_processed.csv'
-
-    restaurant_df.to_csv(
-        file_path,
-        index=False,
-        encoding='utf-8-sig',
-    )
+    restaurant_df.to_csv(file_path, index=False, encoding='utf-8-sig')
 
     loaded_df = pd.read_csv(file_path, encoding='utf-8-sig')
 
@@ -284,31 +207,17 @@ def save_processed_csv(
     return file_path
 
 
-def run_preprocess(
-    interim_csv_file: Path,
-    restaurant_list: list[dict],
-) -> Path:
-    """
-    Interim CSV를 읽어 전처리, 검증, Processed CSV 저장을 수행한다.
-    """
+def run_preprocess(interim_csv_file: Path, restaurant_list: list[dict]) -> Path:
+    """Interim CSV를 읽어 전처리, 검증, Processed CSV 저장을 수행한다."""
     interim_df = load_interim_csv(interim_csv_file)
-
-    restaurant_df = preprocess_restaurants(
-        interim_df,
-        restaurant_list,
-    )
+    restaurant_df = preprocess_restaurants(interim_df, restaurant_list)
 
     summary = validate_restaurant_df(restaurant_df)
-
     print('전처리 검증 결과:', summary)
 
     batch_id = interim_csv_file.parent.name
-
     return save_processed_csv(restaurant_df, batch_id)
 
 
-if __name__ == "__main__":
-    print(
-        'preprocess.py는 main.py에서 '
-        'run_preprocess()로 실행합니다.'
-    )
+if __name__ == '__main__':
+    print('preprocess.py는 main.py에서 run_preprocess()로 실행합니다.')

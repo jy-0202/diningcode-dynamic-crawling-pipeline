@@ -23,7 +23,7 @@ DiningCode 동적 크롤링 데이터 파이프라인 실행 파일
     - Processed CSV를 읽는다.
     - MySQL DB와 테이블을 생성한다.
     - 음식점 데이터를 UPSERT 방식으로 저장한다.
-    - CSV와 DB 저장 건수를 검증한다.
+    - 이번 배치 데이터의 DB 반영 건수와 DB 전체 건수를 검증한다.
 
 [실행 흐름]
 run_crawling()

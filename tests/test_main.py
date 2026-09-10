@@ -11,6 +11,7 @@ def test_main_runs_pipeline_in_order(monkeypatch, tmp_path):
 
     summary = {
         'processed_count': 1,
+        'loaded_count': 1,
         'db_count': 1,
         'count_status': '일치',
     }

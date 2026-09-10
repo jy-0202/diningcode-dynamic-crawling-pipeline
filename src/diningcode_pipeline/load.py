@@ -23,34 +23,34 @@ from .database import (
     test_mysql_connection,
 )
 
-TABLE_NAME = "diningcode_restaurant"
+TABLE_NAME = 'diningcode_restaurant'
 
 DB_COLUMNS = [
-    "restaurant_id",
-    "restaurant_name",
-    "categories",
-    "address",
-    "phone",
-    "open_hours",
-    "feature",
-    "image_url",
-    "menu_1_name",
-    "menu_1_price",
-    "menu_2_name",
-    "menu_2_price",
-    "menu_3_name",
-    "menu_3_price",
-    "source_url",
-    "collected_at",
+    'restaurant_id',
+    'restaurant_name',
+    'categories',
+    'address',
+    'phone',
+    'open_hours',
+    'feature',
+    'image_url',
+    'menu_1_name',
+    'menu_1_price',
+    'menu_2_name',
+    'menu_2_price',
+    'menu_3_name',
+    'menu_3_price',
+    'source_url',
+    'collected_at',
 ]
 
 REQUIRED_DB_COLUMNS = [
-    "restaurant_id",
-    "restaurant_name",
-    "categories",
-    "address",
-    "source_url",
-    "collected_at",
+    'restaurant_id',
+    'restaurant_name',
+    'categories',
+    'address',
+    'source_url',
+    'collected_at',
 ]
 
 CREATE_TABLE_SQL = text(
@@ -139,101 +139,70 @@ UPSERT_SQL = text(
 )
 
 
-def load_processed_csv(
-    file_path: Path,
-) -> pd.DataFrame:
+def load_processed_csv(file_path: Path) -> pd.DataFrame:
     """Processed CSV를 DataFrame으로 읽는다."""
     if not file_path.is_file():
-        raise FileNotFoundError(
-            f'Processed CSV 파일이 없습니다. '
-            f'{file_path}'
-        )
+        raise FileNotFoundError(f'Processed CSV 파일이 없습니다. {file_path}')
 
     return pd.read_csv(
         file_path,
         encoding='utf-8-sig',
         dtype={
-            "restaurant_id": "string",
-            "restaurant_name": "string",
-            "categories": "string",
-            "address": "string",
-            "phone": "string",
-            "open_hours": "string",
-            "feature": "string",
-            "image_url": "string",
-            "menu_1_name": "string",
-            "menu_1_price": "string",
-            "menu_2_name": "string",
-            "menu_2_price": "string",
-            "menu_3_name": "string",
-            "menu_3_price": "string",
-            "source_url": "string",
+            'restaurant_id': 'string',
+            'restaurant_name': 'string',
+            'categories': 'string',
+            'address': 'string',
+            'phone': 'string',
+            'open_hours': 'string',
+            'feature': 'string',
+            'image_url': 'string',
+            'menu_1_name': 'string',
+            'menu_1_price': 'string',
+            'menu_2_name': 'string',
+            'menu_2_price': 'string',
+            'menu_3_name': 'string',
+            'menu_3_price': 'string',
+            'source_url': 'string',
         },
         parse_dates=['collected_at'],
     )
 
 
-def prepare_database_dataframe(
-    df: pd.DataFrame,
-) -> pd.DataFrame:
+def prepare_database_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """DB 저장용 컬럼과 자료형을 정리하고 검증한다."""
-    missing_columns = (
-        set(DB_COLUMNS)
-        - set(df.columns)
-    )
+    missing_columns = set(DB_COLUMNS) - set(df.columns)
 
     if missing_columns:
-        raise ValueError(
-            f'DB 저장에 필요한 컬럼이 누락되었습니다. '
-            f'{sorted(missing_columns)}'
-        )
+        raise ValueError(f'DB 저장에 필요한 컬럼이 누락되었습니다. {sorted(missing_columns)}')
 
     database_df = df[DB_COLUMNS].copy()
-
     string_columns = [column for column in DB_COLUMNS if column != 'collected_at']
 
     for column in string_columns:
         database_df[column] = (
-            database_df[column]
-            .astype('string')
-            .str.strip()
-            .replace('', pd.NA)
+            database_df[column].astype('string').str.strip().replace('', pd.NA)
         )
 
     database_df['collected_at'] = pd.to_datetime(
-        database_df['collected_at'],
-        errors='coerce',
+        database_df['collected_at'], errors='coerce'
     )
 
-    null_counts = (
-        database_df[REQUIRED_DB_COLUMNS]
-        .isna()
-        .sum()
-    )
+    null_counts = database_df[REQUIRED_DB_COLUMNS].isna().sum()
     invalid_nulls = null_counts[null_counts > 0]
 
     if not invalid_nulls.empty:
-        raise ValueError(
-            'DB 필수 컬럼에 결측값이 있습니다.\n'
-            + invalid_nulls.to_string()
-        )
+        raise ValueError('DB 필수 컬럼에 결측값이 있습니다.\n' + invalid_nulls.to_string())
 
     if database_df['restaurant_id'].duplicated().any():
-        raise ValueError(
-            '중복된 restaurant_id가 존재합니다.'
-        )
+        raise ValueError('중복된 restaurant_id가 존재합니다.')
 
     if database_df['source_url'].duplicated().any():
-        raise ValueError(
-            '중복된 source_url이 존재합니다.'
-        )
+        raise ValueError('중복된 source_url이 존재합니다.')
 
     return database_df
 
 
-def dataframe_to_database_records(
-    df: pd.DataFrame,
-) -> list[dict[str, Any]]:
+def dataframe_to_database_records(df: pd.DataFrame) -> list[dict[str, Any]]:
     """DB 저장용 DataFrame을 Python 기본 자료형 레코드 목록으로 변환한다."""
     records: list[dict[str, Any]] = []
 
@@ -245,13 +214,8 @@ def dataframe_to_database_records(
 
             if pd.isna(value):
                 record[column] = None
-
             elif column == 'collected_at':
-                record[column] = (
-                    pd.Timestamp(value)
-                    .to_pydatetime()
-                )
-
+                record[column] = pd.Timestamp(value).to_pydatetime()
             else:
                 record[column] = str(value)
 
@@ -260,27 +224,19 @@ def dataframe_to_database_records(
     return records
 
 
-def create_table(
-    engine: Engine,
-) -> None:
+def create_table(engine: Engine) -> None:
     """diningcode_restaurant 테이블이 없으면 생성한다."""
     with engine.begin() as connection:
         connection.execute(CREATE_TABLE_SQL)
 
 
-def upsert_restaurants(
-    engine: Engine,
-    records: list[dict[str, Any]],
-) -> int:
+def upsert_restaurants(engine: Engine, records: list[dict[str, Any]]) -> int:
     """음식점 데이터를 MySQL에 UPSERT한다."""
     if not records:
         return 0
 
     with engine.begin() as connection:
-        result = connection.execute(
-            UPSERT_SQL,
-            records,
-        )
+        result = connection.execute(UPSERT_SQL, records)
 
     return int(result.rowcount)
 
@@ -298,7 +254,10 @@ def validate_database(
         ).scalar_one()
 
         if restaurant_ids:
-            params = {f'id_{index}': restaurant_id for index, restaurant_id in enumerate(restaurant_ids)}
+            params = {
+                f'id_{index}': restaurant_id
+                for index, restaurant_id in enumerate(restaurant_ids)
+            }
             placeholders = ', '.join(f':id_{index}' for index in range(processed_count))
 
             loaded_count = connection.execute(
@@ -343,9 +302,7 @@ def validate_database(
     }
 
 
-def run_load(
-    processed_csv_file: Path,
-) -> dict[str, int | str]:
+def run_load(processed_csv_file: Path) -> dict[str, int | str]:
     """
     Processed CSV를 MySQL에 UPSERT하고 저장 결과를 검증한다.
 
@@ -353,29 +310,22 @@ def run_load(
         이번 배치 건수, DB 반영 건수, 전체 DB 건수, 건수 비교 결과
     """
     processed_df = load_processed_csv(processed_csv_file)
-
     database_df = prepare_database_dataframe(processed_df)
-
     records = dataframe_to_database_records(database_df)
 
     config = load_database_config()
-
     create_database_if_not_exists(config)
-
     engine = create_mysql_engine(config)
 
     try:
         test_mysql_connection(engine)
-
         create_table(engine)
-
         upsert_restaurants(engine, records)
 
         restaurant_ids = database_df['restaurant_id'].astype(str).tolist()
         summary = validate_database(engine, restaurant_ids)
 
         print(f'MySQL 저장 결과: {summary}')
-
         return summary
 
     finally:
@@ -384,7 +334,4 @@ def run_load(
 
 
 if __name__ == '__main__':
-    print(
-        'load.py는 main.py에서 '
-        'run_load()로 실행합니다.'
-    )
+    print('load.py는 main.py에서 run_load()로 실행합니다.')

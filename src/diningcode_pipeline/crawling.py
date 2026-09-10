@@ -51,23 +51,13 @@ def create_html_batch_directory() -> Path:
     """수집 시각을 이름으로 사용하는 Raw HTML 배치 폴더를 생성한다."""
     batch_id = datetime.now().strftime('%Y%m%d_%H%M%S')
     batch_dir = RAW_HTML_DIR / batch_id
-
     return ensure_directory(batch_dir)
 
 
-def save_raw_html(
-    html: str,
-    batch_dir: Path,
-    file_name: str,
-) -> Path:
+def save_raw_html(html: str, batch_dir: Path, file_name: str) -> Path:
     """Selenium으로 렌더링된 HTML을 Raw 파일로 저장한다."""
     file_path = batch_dir / file_name
-
-    file_path.write_text(
-        html,
-        encoding='utf-8',
-    )
-
+    file_path.write_text(html, encoding='utf-8')
     return file_path
 
 
@@ -75,13 +65,10 @@ def get_restaurant_rid(source_url: str) -> str:
     """DiningCode 상세 URL에서 rid 값을 추출한다."""
     parsed_url = urlparse(source_url)
     query_params = parse_qs(parsed_url.query)
-
     rid_values = query_params.get('rid')
 
     if not rid_values or not rid_values[0]:
-        raise ValueError(
-            f'상세 URL에서 rid를 찾지 못했습니다. {source_url}'
-        )
+        raise ValueError(f'상세 URL에서 rid를 찾지 못했습니다. {source_url}')
 
     return rid_values[0]
 
@@ -114,12 +101,7 @@ def create_driver() -> tuple[webdriver.Chrome, WebDriverWait]:
 def open_site(driver: webdriver.Chrome, wait: WebDriverWait) -> None:
     """DiningCode 메인 페이지에 접속한다."""
     driver.get(BASE_URL)
-
-    wait.until(
-        EC.presence_of_element_located(
-            (By.TAG_NAME, 'body')
-        )
-    )
+    wait.until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
 
     print('페이지 제목:', driver.title)
     print('현재 URL:', driver.current_url)
@@ -138,11 +120,7 @@ def select_region(
     )
     region_button.click()
 
-    wait.until(
-        EC.presence_of_element_located(
-            (By.CLASS_NAME, 'Location__Popup__Layer')
-        )
-    )
+    wait.until(EC.presence_of_element_located((By.CLASS_NAME, 'Location__Popup__Layer')))
 
     city_button = wait.until(
         EC.element_to_be_clickable(
@@ -171,9 +149,7 @@ def select_region(
     region_button.click()
 
     submit_button = wait.until(
-        EC.element_to_be_clickable(
-            (By.CLASS_NAME, 'Location__Popup__Submit')
-        )
+        EC.element_to_be_clickable((By.CLASS_NAME, 'Location__Popup__Submit'))
     )
     submit_button.click()
 
@@ -195,56 +171,37 @@ def scroll_results(
     """결과 페이지를 제한된 횟수만큼 스크롤한다."""
     for scroll_count in range(max_scrolls):
         before_count = len(
-            driver.find_elements(
-                By.CSS_SELECTOR,
-                'h2.Card__Section__Title',
-            )
+            driver.find_elements(By.CSS_SELECTOR, 'h2.Card__Section__Title')
         )
 
-        driver.execute_script(
-            'window.scrollTo(0, document.body.scrollHeight);'
-        )
+        driver.execute_script('window.scrollTo(0, document.body.scrollHeight);')
 
         wait.until(
             lambda current_driver: len(
-                current_driver.find_elements(
-                    By.CSS_SELECTOR,
-                    'h2.Card__Section__Title',
-                )
-            ) > before_count
+                current_driver.find_elements(By.CSS_SELECTOR, 'h2.Card__Section__Title')
+            )
+            > before_count
         )
 
         after_count = len(
-            driver.find_elements(
-                By.CSS_SELECTOR,
-                'h2.Card__Section__Title',
-            )
+            driver.find_elements(By.CSS_SELECTOR, 'h2.Card__Section__Title')
         )
 
-        print(
-            f'스크롤 {scroll_count + 1}회 후 '
-            f'카테고리 개수: {after_count}'
-        )
+        print(f'스크롤 {scroll_count + 1}회 후 카테고리 개수: {after_count}')
 
 
 # ===========================================================
 # 4. 카테고리별 음식점 후보 수집
 # ===========================================================
 
-def collect_restaurant_list(
-    driver: webdriver.Chrome,
-) -> list[dict]:
+def collect_restaurant_list(driver: webdriver.Chrome) -> list[dict]:
     """
     카테고리별 상위 음식점 후보를 수집한다.
 
     중복 제거 전 목록을 반환하여
     이후 categories 통합에도 사용한다.
     """
-    category_sections = driver.find_elements(
-        By.CSS_SELECTOR,
-        'section.Card__Section',
-    )
-
+    category_sections = driver.find_elements(By.CSS_SELECTOR, 'section.Card__Section')
     restaurant_list: list[dict] = []
 
     for category_section in category_sections:
@@ -257,10 +214,7 @@ def collect_restaurant_list(
             By.CSS_SELECTOR,
             'li.Slide__Card__Item',
         )
-
-        restaurant_items = (
-            restaurant_items[:MAX_RESTAURANTS_PER_CATEGORY]
-        )
+        restaurant_items = restaurant_items[:MAX_RESTAURANTS_PER_CATEGORY]
 
         for restaurant_item in restaurant_items:
             if len(restaurant_list) >= MAX_TOTAL_RESTAURANTS:
@@ -271,16 +225,10 @@ def collect_restaurant_list(
                 'p.Card__Rest__Name',
             ).text.strip()
 
-            link_element = restaurant_item.find_element(
-                By.TAG_NAME,
-                'a',
-            )
+            link_element = restaurant_item.find_element(By.TAG_NAME, 'a')
             source_url = link_element.get_attribute('href')
 
-            image_element = link_element.find_element(
-                By.TAG_NAME,
-                'img',
-            )
+            image_element = link_element.find_element(By.TAG_NAME, 'img')
             image_url = image_element.get_attribute('src')
 
             restaurant_list.append(
@@ -295,9 +243,7 @@ def collect_restaurant_list(
     return restaurant_list
 
 
-def remove_duplicate_restaurants(
-    restaurant_list: list[dict],
-) -> list[dict]:
+def remove_duplicate_restaurants(restaurant_list: list[dict]) -> list[dict]:
     """source_url 기준으로 음식점 후보 중복을 제거한다."""
     unique_restaurant_list: list[dict] = []
     seen_urls: list[str] = []
@@ -328,50 +274,29 @@ def save_restaurant_detail_htmls(
     """중복 제거된 음식점의 상세페이지 HTML을 Raw 데이터로 저장한다."""
     detail_files: list[Path] = []
 
-    for index, restaurant in enumerate(
-        unique_restaurant_list,
-        start=1,
-    ):
+    for index, restaurant in enumerate(unique_restaurant_list, start=1):
         print(
             f'{index}/{len(unique_restaurant_list)} '
             f'{restaurant["restaurant_name"]} HTML 저장 중'
         )
 
         driver.get(restaurant['source_url'])
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div#subleft-cont')))
+        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'h1.tit')))
 
-        wait.until(
-            EC.presence_of_element_located(
-                (By.CSS_SELECTOR, 'div#subleft-cont')
-            )
-        )
-
-        wait.until(
-            EC.presence_of_element_located(
-                (By.CSS_SELECTOR, 'h1.tit')
-            )
-        )
-
-        rid = get_restaurant_rid(
-            restaurant['source_url']
-        )
+        rid = get_restaurant_rid(restaurant['source_url'])
 
         detail_file = save_raw_html(
             html=driver.page_source,
             batch_dir=batch_dir,
             file_name=f'restaurant_detail_{rid}.html',
         )
-
         detail_files.append(detail_file)
 
     if len(detail_files) != len(unique_restaurant_list):
-        raise ValueError(
-            '상세 HTML 저장 건수와 음식점 수가 다릅니다.'
-        )
+        raise ValueError('상세 HTML 저장 건수와 음식점 수가 다릅니다.')
 
-    print(
-        '상세 HTML 저장 완료:',
-        len(detail_files),
-    )
+    print('상세 HTML 저장 완료:', len(detail_files))
 
     return detail_files
 
@@ -408,7 +333,12 @@ def run_crawling() -> Path:
             raise ValueError('수집할 음식점 후보가 없습니다.')
 
         # 4. 상세페이지 Raw HTML 저장
-        detail_files = save_restaurant_detail_htmls(driver, wait, unique_restaurant_list, batch_dir)
+        detail_files = save_restaurant_detail_htmls(
+            driver,
+            wait,
+            unique_restaurant_list,
+            batch_dir,
+        )
 
         print()
         print('=' * 60)
