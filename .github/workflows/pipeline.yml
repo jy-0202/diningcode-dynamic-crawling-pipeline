@@ -1,0 +1,114 @@
+name: DiningCode Pipeline
+
+# ===========================================================
+# Pipeline 실행 조건
+# ===========================================================
+
+on:
+  workflow_dispatch:
+
+# ===========================================================
+# GitHub Actions 권한
+# ===========================================================
+
+permissions:
+  contents: read
+
+# ===========================================================
+# DiningCode Pipeline Job
+# ===========================================================
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      # -------------------------------------------------------
+      # 1. GitHub Repository Checkout
+      # -------------------------------------------------------
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # -------------------------------------------------------
+      # 2. Python 설치
+      # -------------------------------------------------------
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      # -------------------------------------------------------
+      # 3. Python Dependency 설치
+      # -------------------------------------------------------
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      # -------------------------------------------------------
+      # 4. Chrome / ChromeDriver 확인
+      # -------------------------------------------------------
+
+      - name: Check Chrome
+        run: |
+          google-chrome --version
+          chromedriver --version
+
+      # -------------------------------------------------------
+      # 5. MySQL 실행
+      # -------------------------------------------------------
+
+      - name: Start MySQL
+        run: |
+          sudo systemctl start mysql.service
+          mysqladmin ping -h 127.0.0.1 -uroot -proot
+
+      # -------------------------------------------------------
+      # 6. MySQL 환경변수 파일 생성
+      # -------------------------------------------------------
+
+      - name: Create database environment file
+        run: |
+          cat <<EOF > .env
+          DB_HOST=127.0.0.1
+          DB_PORT=3306
+          DB_NAME=diningcode
+          DB_USER=root
+          DB_PASSWORD=root
+          EOF
+
+      # -------------------------------------------------------
+      # 7. DiningCode 전체 파이프라인 실행
+      # -------------------------------------------------------
+
+      - name: Run DiningCode pipeline
+        run: python -c "from main import main; main()"
+
+      # -------------------------------------------------------
+      # 8. MySQL 적재 결과 확인
+      # -------------------------------------------------------
+
+      - name: Verify MySQL data
+        run: |
+          mysql -h 127.0.0.1 -uroot -proot diningcode \
+            -e "SELECT COUNT(*) AS restaurant_count FROM diningcode_restaurant;"
+
+      # -------------------------------------------------------
+      # 9. Raw / Interim / Processed 결과 저장
+      # -------------------------------------------------------
+
+      - name: Upload pipeline artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: diningcode-pipeline-data
+          path: |
+            data/raw/html/
+            data/interim/
+            data/processed/
+          retention-days: 7

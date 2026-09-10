@@ -15,6 +15,7 @@ DiningCode 동적 크롤링 수집 모듈
 8. 음식점 상세페이지 Raw HTML 저장
 """
 
+import os
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -88,7 +89,14 @@ def get_restaurant_rid(source_url: str) -> str:
 def create_driver() -> tuple[webdriver.Chrome, WebDriverWait]:
     """Chrome WebDriver와 WebDriverWait 객체를 생성한다."""
     options = Options()
-    options.add_argument('--start-maximized')
+
+    if os.getenv('GITHUB_ACTIONS') == 'true':
+        options.add_argument('--headless=new')
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--window-size=1920,1080')
+    else:
+        options.add_argument('--start-maximized')
 
     driver = webdriver.Chrome(options=options)
     wait = WebDriverWait(driver, WAIT_TIMEOUT)
