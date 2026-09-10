@@ -61,7 +61,7 @@ CREATE_TABLE_SQL = text(
         categories VARCHAR(100) NOT NULL,
         address VARCHAR(255) NOT NULL,
         phone VARCHAR(30) NULL,
-        open_hours VARCHAR(100) NULL,
+        open_hours TEXT NULL,
         feature TEXT NULL,
         image_url VARCHAR(500) NULL,
 

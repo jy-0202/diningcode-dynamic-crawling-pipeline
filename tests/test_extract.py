@@ -1,5 +1,6 @@
 import pandas as pd
 import pytest
+from bs4 import BeautifulSoup
 
 from src.diningcode_pipeline import extract
 
@@ -198,3 +199,37 @@ def test_run_extract_reads_raw_html_and_saves_interim(tmp_path, monkeypatch):
 
     interim_df = pd.read_csv(interim_file, encoding='utf-8-sig')
     assert interim_df.shape == (1, 10)
+
+
+def test_parse_open_hours_extracts_seven_day_schedule():
+    html = """
+    <div class="hour-main-grid">
+        <span class="open-desc">오늘(목)</span>
+        <span id="today-main-hours">휴무일</span>
+
+        <div class="hour-dates-column">
+            <span class="hour_date">9월 11일(금)</span>
+            <span class="hour_date">9월 12일(토)</span>
+        </div>
+
+        <div class="hour-times-column">
+            <div class="hour_time_item">
+                <span class="hour_time">영업시간: 11:30 - 22:00</span>
+                <span class="hour_time">라스트오더: 21:00</span>
+            </div>
+            <div class="hour_time_item">
+                <span class="hour_time closed">휴무일</span>
+            </div>
+        </div>
+    </div>
+    """
+
+    soup = BeautifulSoup(html, 'html.parser')
+
+    result = extract.parse_open_hours(soup)
+
+    assert result == (
+        '오늘(목): 휴무일 | '
+        '9월 11일(금): 영업시간: 11:30 - 22:00 / 라스트오더: 21:00 | '
+        '9월 12일(토): 휴무일'
+    )

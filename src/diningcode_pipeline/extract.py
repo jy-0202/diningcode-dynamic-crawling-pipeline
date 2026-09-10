@@ -218,6 +218,34 @@ def parse_address(
     return ' '.join(address_parts)
 
 
+def parse_open_hours(soup: BeautifulSoup) -> str | None:
+    """상세 HTML에서 오늘부터 7일간의 영업시간을 추출한다."""
+    today_label = get_optional_text(soup, '.hour-main-grid .open-desc')
+    today_hours = get_optional_text(soup, '#today-main-hours')
+
+    if today_hours is None:
+        return None
+
+    open_hours = []
+
+    if today_label:
+        open_hours.append(f'{today_label}: {today_hours}')
+    else:
+        open_hours.append(today_hours)
+
+    date_elements = soup.select('.hour-dates-column .hour_date')
+    time_elements = soup.select('.hour-times-column .hour_time_item')
+
+    for date_element, time_element in zip(date_elements, time_elements):
+        date_text = date_element.get_text(' ', strip=True)
+        time_text = time_element.get_text(' / ', strip=True)
+
+        if date_text and time_text:
+            open_hours.append(f'{date_text}: {time_text}')
+
+    return ' | '.join(open_hours)
+
+
 def parse_top_menus(
     soup: BeautifulSoup,
 ) -> list[dict]:
@@ -280,10 +308,7 @@ def parse_restaurant_detail(
             soup,
             'div.basic-info li.tel',
         ),
-        'open_hours': get_optional_text(
-            soup,
-            '#today-main-hours',
-        ),
+        'open_hours': parse_open_hours(soup),
         'tag': get_optional_text(
             soup,
             'div.basic-info li.tag',
