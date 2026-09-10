@@ -89,8 +89,9 @@ def get_restaurant_rid(source_url: str) -> str:
 def create_driver() -> tuple[webdriver.Chrome, WebDriverWait]:
     """Chrome WebDriver와 WebDriverWait 객체를 생성한다."""
     options = Options()
+    headless = os.getenv('HEADLESS', 'false').lower() == 'true'
 
-    if os.getenv('GITHUB_ACTIONS') == 'true':
+    if headless:
         options.add_argument('--headless=new')
         options.add_argument('--window-size=1920,1080')
 
