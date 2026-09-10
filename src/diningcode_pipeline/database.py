@@ -1,7 +1,8 @@
 """
 MySQL 연결 설정과 SQLAlchemy Engine 생성을 담당하는 모듈입니다.
 
-로컬 환경에서는 .env 파일에서 데이터베이스 접속 정보를 읽습니다.
+로컬 환경에서는 .env 파일을 사용할 수 있으며,
+배포 환경에서는 환경변수에서 데이터베이스 접속 정보를 읽습니다.
 DB 연결 책임을 load.py에서 분리하여 적재 로직과 연결 설정을 구분합니다.
 """
 
@@ -34,13 +35,9 @@ REQUIRED_ENV_NAMES = {
 def load_database_config(
     env_file: Path = ENV_FILE,
 ) -> dict[str, str | int]:
-    """.env 파일에서 MySQL 연결 정보를 읽고 검증한다."""
-    if not env_file.is_file():
-        raise FileNotFoundError(
-            f'.env 파일이 없습니다. {env_file}'
-        )
-
-    load_dotenv(dotenv_path=env_file)
+    """MySQL 환경변수를 읽고 검증한다."""
+    if env_file.is_file():
+        load_dotenv(dotenv_path=env_file)
 
     missing_names = [
         name

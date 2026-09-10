@@ -29,15 +29,33 @@ def set_db_environment(monkeypatch, **overrides):
             monkeypatch.setenv(name, value)
 
 
-def test_load_database_config_raises_when_env_file_is_missing(tmp_path):
-    with pytest.raises(FileNotFoundError):
-        database.load_database_config(tmp_path / '.env')
-
-
-def test_load_database_config_returns_valid_config(tmp_path, monkeypatch):
-    env_file = tmp_path / '.env'
-    env_file.write_text('', encoding='utf-8')
+def test_load_database_config_uses_environment_without_env_file(tmp_path, monkeypatch):
     set_db_environment(monkeypatch)
+
+    result = database.load_database_config(tmp_path / '.env')
+
+    assert result == {
+        'host': 'localhost',
+        'port': 3306,
+        'database': 'diningcode',
+        'user': 'root',
+        'password': 'password',
+    }
+
+
+def test_load_database_config_reads_env_file(tmp_path, monkeypatch):
+    for name in ENV_NAMES:
+        monkeypatch.delenv(name, raising=False)
+
+    env_file = tmp_path / '.env'
+    env_file.write_text(
+        'DB_HOST=localhost\n'
+        'DB_PORT=3306\n'
+        'DB_NAME=diningcode\n'
+        'DB_USER=root\n'
+        'DB_PASSWORD=password\n',
+        encoding='utf-8',
+    )
 
     result = database.load_database_config(env_file)
 

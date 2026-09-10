@@ -13,6 +13,11 @@ jobs:
 
     env:
       HEADLESS: 'false'
+      DB_HOST: ${{ secrets.DB_HOST }}
+      DB_PORT: ${{ secrets.DB_PORT }}
+      DB_NAME: ${{ secrets.DB_NAME }}
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
 
     steps:
       # -------------------------------------------------------
@@ -44,18 +49,27 @@ jobs:
           .venv\Scripts\python.exe -m pip install -r requirements.txt
 
       # -------------------------------------------------------
-      # 4. DiningCode Crawling / Extract / Preprocess 실행
+      # 4. MySQL 연결 가능 여부 확인
       # -------------------------------------------------------
 
-      - name: Run Crawling Extract Preprocess
+      - name: Check MySQL connection
+        shell: cmd
+        run: |
+          .venv\Scripts\python.exe -c "import os, socket; conn = socket.create_connection((os.environ['DB_HOST'], int(os.environ['DB_PORT'])), timeout=5); conn.close(); print('MySQL port connection OK')"
+
+      # -------------------------------------------------------
+      # 5. DiningCode 전체 파이프라인 실행
+      # -------------------------------------------------------
+
+      - name: Run DiningCode pipeline
         shell: cmd
         run: |
           chcp 65001 > nul
           set "PYTHONUTF8=1"
-          .venv\Scripts\python.exe -c "from src.diningcode_pipeline import run_crawling, run_extract, run_preprocess; raw_batch_dir = run_crawling(); interim_csv_file, restaurant_list = run_extract(raw_batch_dir); processed_csv_file = run_preprocess(interim_csv_file, restaurant_list); print('GitHub Actions Pipeline 완료'); print(f'Raw: {raw_batch_dir}'); print(f'Interim: {interim_csv_file}'); print(f'Processed: {processed_csv_file}')"
+          .venv\Scripts\python.exe -c "from main import main; main()"
 
       # -------------------------------------------------------
-      # 5. Raw / Interim / Processed 결과 저장
+      # 6. Raw / Interim / Processed 결과 저장
       # -------------------------------------------------------
 
       - name: Upload pipeline artifacts
