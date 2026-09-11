@@ -16,11 +16,11 @@ permissions:
   id-token: write
 
 # ===========================================================
-# 3. GCE Connection Test Job
+# 3. GCE Deploy Job
 # ===========================================================
 
 jobs:
-  connection-test:
+  deploy:
     runs-on: ubuntu-latest
 
     steps:
@@ -52,23 +52,44 @@ jobs:
           project_id: ${{ vars.GCP_PROJECT_ID }}
 
       # -------------------------------------------------------
-      # 4. Google Cloud 인증 확인
+      # 4. GCE에 최신 코드 배포
       # -------------------------------------------------------
 
-      - name: Check Google Cloud authentication
-        run: |
-          gcloud auth list
-          gcloud config get-value project
-
-      # -------------------------------------------------------
-      # 5. GCE SSH 연결 확인
-      # -------------------------------------------------------
-
-      - name: Check GCE SSH connection
+      - name: Deploy to GCE
         run: |
           gcloud compute ssh "${{ vars.GCE_INSTANCE }}" \
             --project="${{ vars.GCP_PROJECT_ID }}" \
             --zone="${{ vars.GCE_ZONE }}" \
             --tunnel-through-iap \
-            --command="hostname && whoami && pwd" \
+            --command='
+              set -e
+
+              APP_DIR="$HOME/diningcode-dynamic-crawling-pipeline"
+
+              if [ -d "$APP_DIR/.git" ]; then
+                echo "기존 저장소 업데이트"
+                git -C "$APP_DIR" fetch origin main
+                git -C "$APP_DIR" reset --hard origin/main
+              else
+                echo "저장소 최초 Clone"
+                git clone https://github.com/jy-0202/diningcode-dynamic-crawling-pipeline.git "$APP_DIR"
+              fi
+
+              cd "$APP_DIR"
+
+              if [ ! -d ".venv" ]; then
+                python3 -m venv .venv
+              fi
+
+              .venv/bin/python -m pip install --upgrade pip
+              .venv/bin/python -m pip install -r requirements.txt
+
+              echo "배포된 Commit"
+              git rev-parse --short HEAD
+
+              echo "Python"
+              .venv/bin/python --version
+
+              echo "GCE CD 배포 완료"
+            ' \
             --quiet
