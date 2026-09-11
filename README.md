@@ -6,7 +6,7 @@ Selenium을 활용해 DiningCode의 동적 페이지에서 음식점 정보를 �
 
 까지 수행하는 개인 데이터 수집 파이프라인 프로젝트입니다.
 
-로컬 실행뿐 아니라 pytest, Ruff, GitHub Actions CI와 Windows Self-hosted Runner 기반 전체 배치 실행 환경도 구성했습니다.
+로컬 실행뿐 아니라 pytest, Ruff, GitHub Actions CI, Windows Self-hosted Runner 기반 전체 배치 실행, Google Compute Engine(GCE) 실행 환경 및 CI 성공 후 자동 CD까지 구성했습니다.
 
 ---
 
@@ -25,7 +25,10 @@ JavaScript 기반 동적 웹페이지에서 필요한 데이터를 수집하고,
 - pytest 기반 단위 테스트
 - Ruff 기반 정적 코드 검사
 - GitHub Actions 기반 CI 자동화
-- Self-hosted Runner 기반 전체 데이터 파이프라인 실행
+- Windows Self-hosted Runner 기반 전체 데이터 파이프라인 실행
+- Google Compute Engine 기반 Linux 실행 환경 구성
+- GitHub Actions CI 성공 후 GCE 자동 배포
+- Workload Identity Federation, IAP, OS Login 기반 CD 인증
 - 실행 결과 Artifact 보관
 
 ---
@@ -46,7 +49,7 @@ JavaScript 기반 동적 웹페이지에서 필요한 데이터를 수집하고,
 
 ---
 
-## 3. 전체 파이프라인
+## 3. 전체 데이터 파이프라인
 
 ```text
 DiningCode
@@ -122,7 +125,7 @@ Raw HTML을 별도로 보관하면 다음과 같은 장점이 있습니다.
 - HTML 파싱 오류 발생 시 원본 데이터 기준으로 디버깅 가능
 - Crawling과 Extract 단계의 책임 분리
 - Raw / Interim / Processed 데이터 계층 구분
-- 이후 클라우드 스토리지 기반 파이프라인으로 확장하기 쉬운 구조
+- 이후 Object Storage 기반 파이프라인으로 확장하기 쉬운 구조
 
 Raw HTML 저장은 최초 사이트 접근 횟수를 줄이는 기능은 아니지만, 이후 데이터 추출 및 전처리 개발 과정에서 불필요한 재크롤링을 줄일 수 있습니다.
 
@@ -224,14 +227,12 @@ Interim CSV를 최종 적재 구조로 전처리하고 데이터 품질을 검�
 DB 연결 책임을 Load 단계에서 분리하여 관리합니다.
 
 - 로컬 `.env` 파일 지원
-- 배포 및 자동화 환경의 환경변수 지원
+- 자동화 및 배포 환경의 환경변수 지원
 - 필수 DB 환경변수 검증
 - `DB_PORT` 자료형 검증
 - MySQL Database가 없으면 생성
 - SQLAlchemy Engine 생성
 - MySQL 연결 상태 확인
-
-로컬에서는 `.env`를 사용할 수 있고, GitHub Actions에서는 GitHub Secrets를 환경변수로 전달합니다.
 
 ### Load
 
@@ -285,7 +286,7 @@ Raw, Interim, Processed 데이터는 동일한 `batch_id`를 사용하여 하나
 예:
 
 ```text
-20260910_234951
+20260911_041026
 ```
 
 ### Raw
@@ -366,11 +367,6 @@ db_count        : 77
 count_status    : 일치
 ```
 
-- `processed_count`: 이번 Processed CSV 건수
-- `loaded_count`: 이번 배치 ID 중 DB에 존재하는 건수
-- `db_count`: DB 전체 누적 건수
-- `count_status`: `processed_count`와 `loaded_count` 비교 결과
-
 ---
 
 ## 9. 프로젝트 구조
@@ -379,6 +375,7 @@ count_status    : 일치
 .
 ├── .github/
 │   └── workflows/
+│       ├── cd.yml
 │       ├── ci.yml
 │       └── pipeline.yml
 │
@@ -422,11 +419,23 @@ count_status    : 일치
 
 ## 10. 실행 환경
 
-- Python 3.10+
+### 로컬 / Windows Self-hosted Runner
+
+- Python 3.13
 - Google Chrome
 - MySQL
+- Windows
 
-주요 Python 라이브러리:
+### Google Compute Engine
+
+- Ubuntu 24.04 LTS
+- E2 기반 VM
+- Google Chrome
+- Xvfb
+- Python 3.12
+- MySQL
+
+### 주요 Python 라이브러리
 
 - Selenium
 - BeautifulSoup4
@@ -435,11 +444,15 @@ count_status    : 일치
 - PyMySQL
 - python-dotenv
 
-개발 및 자동화 도구:
+### 개발 및 자동화 도구
 
 - pytest
 - Ruff
 - GitHub Actions
+- Google Cloud CLI
+- Workload Identity Federation
+- IAP
+- OS Login
 
 CI에서는 Python 3.13 환경을 사용합니다.
 
@@ -481,7 +494,7 @@ python -m pip install -r requirements-dev.txt
 
 ## 12. DB 환경변수 설정
 
-로컬 실행 시 `.env.example`을 참고하여 프로젝트 루트에 `.env` 파일을 생성합니다.
+로컬 또는 GCE에서 실행할 때 `.env.example`을 참고하여 프로젝트 루트에 `.env` 파일을 생성할 수 있습니다.
 
 ```env
 DB_HOST=
@@ -496,14 +509,14 @@ DB_PASSWORD=
 `database.py`는 다음 두 방식을 지원합니다.
 
 ```text
-로컬
+로컬 / GCE
 → .env
 
-자동화 / 배포 환경
+자동화 환경
 → 환경변수
 ```
 
-GitHub Actions 전체 Pipeline에서는 Repository Secrets에 다음 값을 등록하여 사용합니다.
+Windows Self-hosted Runner 기반 전체 Pipeline에서는 Repository Secrets에 다음 값을 등록하여 환경변수로 전달합니다.
 
 ```text
 DB_HOST
@@ -538,9 +551,21 @@ python main.py
 
 ---
 
-## 14. 데이터 품질 검증
+## 14. GCE 실행
 
-각 파이프라인 단계에서 다음 내용을 검증합니다.
+GCE에서는 Headless Chrome 대신 Xvfb 가상 디스플레이에서 일반 Chrome을 실행합니다.
+
+전체 Pipeline 실행 예:
+
+```bash
+xvfb-run -a env HEADLESS=false .venv/bin/python main.py
+```
+
+GCE VM 내부 MySQL은 `127.0.0.1:3306`에만 바인딩하여 외부에 DB 포트를 공개하지 않습니다.
+
+---
+
+## 15. 데이터 품질 검증
 
 ### Extract
 
@@ -569,34 +594,31 @@ python main.py
 
 ---
 
-## 15. 테스트 및 Ruff
+## 16. 테스트 및 Ruff
 
 실제 외부 사이트나 MySQL에 의존하지 않도록 단위 테스트에서는 pytest의 `monkeypatch`, 임시 경로 및 Fake 객체를 활용합니다.
 
-테스트 대상은 다음과 같습니다.
+주요 테스트 대상:
 
 - Crawling 보조 함수
 - Raw HTML 저장
 - WebDriver 종료 처리
 - `source_url` 중복 제거
 - Raw HTML 파일 로드
-- 음식점 목록 파싱
-- 상세정보 파싱
+- 음식점 목록 및 상세정보 파싱
 - 7일 영업시간 파싱
 - 상위 메뉴 추출
 - canonical URL 추출
-- Interim CSV 저장
+- Interim / Processed CSV 저장
 - 메뉴 데이터 변환
 - 복수 카테고리 통합
-- Processed 데이터 전처리
 - 데이터 품질 검증
-- Processed CSV 저장
 - `.env` 및 환경변수 기반 DB 설정
 - SQLAlchemy Engine 생성
 - DB 생성 및 연결 확인
 - DB 저장용 DataFrame 및 레코드 변환
 - CREATE TABLE / UPSERT 호출
-- 현재 배치의 DB 반영 검증
+- 현재 배치 DB 반영 검증
 - `main.py` 전체 단계 호출 순서
 
 테스트 실행:
@@ -605,7 +627,7 @@ python main.py
 python -m pytest -q
 ```
 
-현재 기준 로컬 테스트 결과:
+현재 기준:
 
 ```text
 56 passed
@@ -619,7 +641,7 @@ python -m ruff check .
 
 ---
 
-## 16. GitHub Actions CI
+## 17. GitHub Actions CI
 
 `.github/workflows/ci.yml`
 
@@ -641,11 +663,11 @@ CI는 실제 DiningCode 크롤링이나 실제 MySQL 연결을 수행하지 않�
 
 ---
 
-## 17. GitHub Actions 전체 Pipeline
+## 18. GitHub Actions 전체 Pipeline
 
 `.github/workflows/pipeline.yml`
 
-실제 크롤링부터 MySQL 적재까지 실행하는 Workflow도 별도로 구성했습니다.
+실제 크롤링부터 MySQL 적재까지 실행하는 Workflow를 별도로 구성했습니다.
 
 전체 Pipeline은 `workflow_dispatch`를 사용하여 GitHub Actions 화면에서 수동으로 실행합니다.
 
@@ -677,7 +699,7 @@ MySQL UPSERT
 Artifact 업로드
 ```
 
-실제 브라우저 기반 수집이 필요한 Workflow이므로 검증된 Windows Self-hosted Runner에서 실행하며, Pipeline 실행 시 Chrome을 일반 브라우저 모드로 실행하도록 `HEADLESS=false`를 사용합니다.
+Pipeline 실행 시 Chrome을 일반 브라우저 모드로 실행하도록 `HEADLESS=false`를 사용합니다.
 
 DB 접속 정보는 GitHub Repository Secrets를 통해 환경변수로 전달합니다.
 
@@ -693,13 +715,194 @@ data/processed/
 
 Artifact 보관 기간은 7일입니다.
 
-이를 통해 GitHub Actions 실행 결과와 각 데이터 계층의 산출물을 함께 확인할 수 있습니다.
+---
+
+## 19. Google Compute Engine 실행 환경
+
+클라우드 VM에서도 실제 Pipeline이 동작하는지 검증하기 위해 Google Compute Engine에 Ubuntu 기반 실행 환경을 구성했습니다.
+
+```text
+Google Compute Engine
+    ↓
+Ubuntu 24.04 LTS
+    ↓
+Google Chrome + Xvfb
+    ↓
+Python Virtual Environment
+    ↓
+DiningCode Pipeline
+    ↓
+MySQL
+```
+
+GCE에서 실제로 다음 단계를 검증했습니다.
+
+```text
+Crawling
+→ Raw HTML
+→ Extract
+→ Interim CSV
+→ Preprocess
+→ Processed CSV
+→ MySQL UPSERT
+→ 현재 배치 DB 반영 검증
+```
+
+MySQL은 동일 VM 내부에서 실행하며 외부 DB 포트를 열지 않고 `localhost` 연결을 사용합니다.
 
 ---
 
-## 18. 기준 실행 결과
+## 20. 실행 환경에 따른 크롤링 차이
 
-2026-09-10 전체 Pipeline 실행 기준 결과입니다.
+동일한 Selenium 코드라도 실행 환경과 브라우저 실행 방식에 따라 대상 사이트의 응답이 달라질 수 있음을 확인했습니다.
+
+GCE 검증 결과:
+
+```text
+curl
+→ 403 Forbidden
+
+Headless Chrome
+→ 403 Forbidden
+
+Xvfb + 일반 Chrome
+→ 정상 페이지 응답
+→ 실제 Crawling 성공
+```
+
+따라서 GCE에서는 별도의 프록시나 User-Agent 변경 없이 Xvfb 가상 디스플레이에서 일반 Chrome을 실행하는 방식을 사용합니다.
+
+이 결과는 특정 차단 원인을 단정하기 위한 것이 아니라 실제 실행 환경에서 관찰된 응답 차이를 기준으로 실행 방식을 결정한 것입니다.
+
+---
+
+## 21. GitHub Actions CD
+
+`.github/workflows/cd.yml`
+
+CI를 통과한 코드를 Google Compute Engine에 자동 배포하는 CD Workflow를 구성했습니다.
+
+```text
+main push
+    ↓
+GitHub Actions CI
+    ↓
+Ruff + pytest
+    ↓
+CI 성공
+    ↓
+GitHub Actions CD
+    ↓
+GitHub OIDC
+    ↓
+Workload Identity Federation
+    ↓
+GCP Service Account
+    ↓
+IAP Tunnel
+    ↓
+OS Login
+    ↓
+GCE
+    ↓
+CI가 검증한 동일 Commit 배포
+```
+
+### CI와 CD 연결
+
+CD는 `workflow_run`을 이용하여 CI 완료 이벤트를 확인합니다.
+
+```text
+CI 성공
+→ CD 실행
+
+CI 실패
+→ CD 배포하지 않음
+```
+
+수동 검증이 필요한 경우에는 `workflow_dispatch`를 이용해 CD를 직접 실행할 수도 있습니다.
+
+### CI 검증 Commit 배포
+
+CD는 단순히 실행 시점의 최신 `main`을 배포하지 않고 CI가 성공한 `head_sha`를 배포 대상으로 사용합니다.
+
+검증 사례:
+
+```text
+CI 검증 Commit:
+97227d9d0490415ae1c7787de4be900f4f689f4f
+
+GCE 배포 Commit:
+97227d9
+```
+
+이를 통해 CI가 검증한 코드와 실제 GCE에 배포된 코드를 일치시킵니다.
+
+### Workload Identity Federation
+
+GitHub Actions에 장기 Service Account JSON Key를 저장하지 않고 GitHub OIDC와 Google Cloud Workload Identity Federation을 사용합니다.
+
+```text
+GitHub OIDC Token
+    ↓
+Workload Identity Provider
+    ↓
+GCP Service Account
+```
+
+Workload Identity Provider 조건에서 허용 Repository와 `main` 브랜치를 제한합니다.
+
+### IAP + OS Login
+
+GCE SSH 접속에는 IAP Tunnel과 OS Login을 사용합니다.
+
+CD용 Service Account에 필요한 IAM 권한을 별도로 부여하고 IAP를 통해 SSH 연결을 수행합니다.
+
+### 임시 SSH Key
+
+GitHub-hosted Runner는 매 실행마다 임시 SSH Key를 생성합니다.
+
+```text
+GitHub Runner 시작
+    ↓
+임시 SSH Key 생성
+    ↓
+Public Key를 OS Login에 등록
+    ↓
+TTL 10분
+    ↓
+GCE 배포
+    ↓
+Runner 종료
+```
+
+장기 SSH Private Key를 GitHub Secrets에 저장하지 않습니다.
+
+### CD와 Batch 실행 분리
+
+CD의 목적은 **검증된 최신 코드를 GCE에 배포하는 것**입니다.
+
+따라서 CD Workflow에서는 실제 DiningCode 크롤링을 실행하지 않습니다.
+
+```text
+코드 변경
+→ CI
+→ CD
+→ GCE 코드 배포
+
+실제 데이터 수집
+→ 별도 실행
+```
+
+README나 테스트 코드 변경만으로 외부 사이트 크롤링이 반복 실행되는 구조를 방지하기 위해 배포와 Batch 실행을 분리했습니다.
+
+---
+
+## 22. 기준 실행 결과
+
+### Windows Self-hosted Runner
+
+2026-09-10 전체 Pipeline 실행 기준:
 
 ```text
 음식점 후보              : 75
@@ -707,53 +910,94 @@ source_url 중복 제거 후   : 72
 상세 Raw HTML             : 72
 Interim CSV               : 72
 Processed CSV             : 72
-Processed 컬럼             : 16
-restaurant_id 중복         : 0
-source_url 중복            : 0
-MySQL 배치 반영            : 72 / 72
-count_status               : 일치
+Processed 컬럼            : 16
+restaurant_id 중복        : 0
+source_url 중복           : 0
+MySQL 배치 반영           : 72 / 72
+count_status              : 일치
 ```
 
-또한 목록 HTML 1개와 상세 HTML 72개가 동일한 batch_id의 Raw 데이터로 저장되고, 같은 batch_id로 Interim / Processed 데이터가 생성되는 것을 확인했습니다.
+### Google Compute Engine
 
-수집 대상 사이트의 데이터와 노출 순서는 변경될 수 있으므로 위 수치는 고정 요구사항이 아니라 **기준 실행 결과**입니다.
+2026-09-11 GCE 실행 기준:
+
+```text
+음식점 후보              : 75
+source_url 중복 제거 후   : 72
+상세 Raw HTML             : 72
+Interim CSV               : 72
+Processed CSV             : 72
+Processed 컬럼            : 16
+restaurant_id 중복        : 0
+source_url 중복           : 0
+MySQL processed_count     : 72
+MySQL loaded_count        : 72
+MySQL db_count            : 72
+count_status              : 일치
+```
+
+GCE에서도 Crawling부터 MySQL Load까지 실제 실행하여 동일한 데이터 계층과 적재 흐름이 동작함을 확인했습니다.
+
+수집 대상 사이트의 데이터와 노출 순서는 변경될 수 있으므로 위 수치는 고정 요구사항이 아니라 기준 실행 결과입니다.
 
 ---
 
-## 19. 실행 환경에 따른 크롤링 차이
-
-동일한 Selenium 코드라도 실행 환경에 따라 대상 사이트의 응답이 달라질 수 있습니다.
-
-GitHub-hosted 환경과 Headless 실행 환경에서는 대상 사이트 접근 과정에서 정상 페이지가 반환되지 않는 사례를 확인했으며, 현재 실제 전체 Pipeline은 정상 동작을 확인한 Windows Self-hosted Runner에서 실행합니다.
-
-CI와 실제 데이터 수집 Workflow를 분리하여 다음처럼 운영합니다.
+## 23. CI / CD / Batch 역할 분리
 
 ```text
 CI
-→ GitHub-hosted Runner
-→ Ruff + pytest
+GitHub-hosted Runner
+→ Ruff
+→ pytest
+→ 코드 품질 검증
 
-실제 Pipeline
-→ Self-hosted Runner
-→ Selenium + MySQL
+CD
+GitHub-hosted Runner
+→ WIF 인증
+→ IAP + OS Login
+→ GCE에 CI 검증 Commit 배포
+
+Batch Pipeline
+Windows Self-hosted Runner 또는 GCE
+→ Selenium Crawling
+→ Extract
+→ Preprocess
+→ MySQL Load
 ```
 
-이를 통해 코드 품질 검증과 외부 사이트에 의존하는 실제 데이터 수집 작업의 실행 환경을 분리했습니다.
+코드 검증, 배포, 실제 외부 데이터 수집의 책임을 분리하여 운영합니다.
 
 ---
 
-## 20. 향후 개선
+## 24. 보안 및 운영 고려사항
 
-현재까지 로컬 및 Windows Self-hosted Runner 기반 데이터 파이프라인 실행을 완료했습니다.
+- `.env`는 Git에 포함하지 않음
+- GitHub Actions 전체 Pipeline의 DB 접속 정보는 Repository Secrets 사용
+- GCE CD 인증에 장기 Service Account JSON Key를 사용하지 않음
+- GitHub OIDC + Workload Identity Federation 사용
+- Workload Identity Provider의 Repository / Branch 조건 제한
+- CD용 Service Account에 필요한 IAM 권한을 별도로 부여
+- GCE SSH는 IAP + OS Login 사용
+- CD 실행 시 TTL이 있는 임시 SSH Key 사용
+- GCE MySQL은 `127.0.0.1:3306`에만 바인딩
+- MySQL 3306 포트를 외부 공개하지 않음
+- 실제 크롤링 실행과 코드 배포를 분리하여 불필요한 외부 사이트 호출 방지
 
-향후에는 다음 내용을 단계적으로 검토할 예정입니다.
+---
 
-- 클라우드 VM 기반 실행 환경 구성
-- 클라우드 환경에서 Selenium 실행 가능 여부 검증
+## 25. 향후 개선
+
+현재까지 로컬, Windows Self-hosted Runner, GCE 기반 Pipeline 실행 및 CI/CD 자동 배포를 완료했습니다.
+
+향후에는 다음 내용을 검토할 예정입니다.
+
 - Raw / Interim / Processed 데이터의 Object Storage 저장
-- 관리형 MySQL 연동
-- 배치 실행 스케줄링
+- Cloud SQL 또는 RDS 등 관리형 MySQL 연동
+- GCE Batch 실행 스케줄링
 - 실행 로그 및 실패 상태 모니터링
-- AWS Lambda / S3 / RDS / Step Functions / EventBridge 기반 서버리스 구조 검토
+- CD 배포 실패 시 Rollback 전략
+- Dependency 설치 최적화 및 배포 시간 단축
+- README-only 변경 시 CI/CD 실행 조건 최적화
+- AWS Lambda / S3 / RDS / Step Functions / EventBridge 기반 서버리스 구조 재검토
 
-외부 사이트의 접근 정책과 실행 환경의 제약을 고려하여 실제 동작을 검증한 방식만 최종 배포 구조에 반영할 예정입니다.
+외부 사이트의 접근 정책과 실행 환경의 제약을 고려하여 실제 동작을 검증한 방식만 최종 배포 구조에 반영합니다.
