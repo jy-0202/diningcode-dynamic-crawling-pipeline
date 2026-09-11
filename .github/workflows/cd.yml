@@ -52,7 +52,25 @@ jobs:
           project_id: ${{ vars.GCP_PROJECT_ID }}
 
       # -------------------------------------------------------
-      # 4. GCE에 최신 코드 배포
+      # 4. OS Login 임시 SSH Key 등록
+      # -------------------------------------------------------
+
+      - name: Configure OS Login SSH key
+        run: |
+          mkdir -p "$HOME/.ssh"
+
+          ssh-keygen \
+            -t ed25519 \
+            -N "" \
+            -f "$HOME/.ssh/gce_cd_key"
+
+          gcloud compute os-login ssh-keys add \
+            --key-file="$HOME/.ssh/gce_cd_key.pub" \
+            --ttl=10m \
+            --project="${{ vars.GCP_PROJECT_ID }}"
+
+      # -------------------------------------------------------
+      # 5. GCE에 최신 코드 배포
       # -------------------------------------------------------
 
       - name: Deploy to GCE
@@ -61,6 +79,7 @@ jobs:
             --project="${{ vars.GCP_PROJECT_ID }}" \
             --zone="${{ vars.GCE_ZONE }}" \
             --tunnel-through-iap \
+            --ssh-key-file="$HOME/.ssh/gce_cd_key" \
             --command='
               set -e
 
@@ -84,10 +103,10 @@ jobs:
               .venv/bin/python -m pip install --upgrade pip
               .venv/bin/python -m pip install -r requirements.txt
 
-              echo "배포된 Commit"
+              echo "배포된 Commit:"
               git rev-parse --short HEAD
 
-              echo "Python"
+              echo "Python:"
               .venv/bin/python --version
 
               echo "GCE CD 배포 완료"
