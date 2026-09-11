@@ -7,6 +7,14 @@ name: CD
 on:
   workflow_dispatch:
 
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - main
+
 # ===========================================================
 # 2. GitHub Actions 권한
 # ===========================================================
@@ -21,6 +29,10 @@ permissions:
 
 jobs:
   deploy:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
     runs-on: ubuntu-latest
 
     steps:
@@ -70,45 +82,52 @@ jobs:
             --project="${{ vars.GCP_PROJECT_ID }}"
 
       # -------------------------------------------------------
-      # 5. GCE에 최신 코드 배포
+      # 5. GCE에 CI 검증 Commit 배포
       # -------------------------------------------------------
 
       - name: Deploy to GCE
+        env:
+          DEPLOY_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
         run: |
+          echo "Deploy SHA: $DEPLOY_SHA"
+
           gcloud compute ssh "${{ vars.GCE_INSTANCE }}" \
             --project="${{ vars.GCP_PROJECT_ID }}" \
             --zone="${{ vars.GCE_ZONE }}" \
             --tunnel-through-iap \
             --ssh-key-file="$HOME/.ssh/gce_cd_key" \
-            --command='
+            --command="
               set -e
 
-              APP_DIR="$HOME/diningcode-dynamic-crawling-pipeline"
+              APP_DIR=\"\$HOME/diningcode-dynamic-crawling-pipeline\"
+              DEPLOY_SHA=\"$DEPLOY_SHA\"
 
-              if [ -d "$APP_DIR/.git" ]; then
-                echo "기존 저장소 업데이트"
-                git -C "$APP_DIR" fetch origin main
-                git -C "$APP_DIR" reset --hard origin/main
+              if [ -d \"\$APP_DIR/.git\" ]; then
+                echo \"기존 저장소 업데이트\"
+                git -C \"\$APP_DIR\" fetch origin main
               else
-                echo "저장소 최초 Clone"
-                git clone https://github.com/jy-0202/diningcode-dynamic-crawling-pipeline.git "$APP_DIR"
+                echo \"저장소 최초 Clone\"
+                git clone https://github.com/jy-0202/diningcode-dynamic-crawling-pipeline.git \"\$APP_DIR\"
+                git -C \"\$APP_DIR\" fetch origin main
               fi
 
-              cd "$APP_DIR"
+              git -C \"\$APP_DIR\" reset --hard \"\$DEPLOY_SHA\"
 
-              if [ ! -d ".venv" ]; then
+              cd \"\$APP_DIR\"
+
+              if [ ! -d \".venv\" ]; then
                 python3 -m venv .venv
               fi
 
               .venv/bin/python -m pip install --upgrade pip
               .venv/bin/python -m pip install -r requirements.txt
 
-              echo "배포된 Commit:"
+              echo \"배포된 Commit:\"
               git rev-parse --short HEAD
 
-              echo "Python:"
+              echo \"Python:\"
               .venv/bin/python --version
 
-              echo "GCE CD 배포 완료"
-            ' \
+              echo \"GCE CD 배포 완료\"
+            " \
             --quiet
