@@ -1,0 +1,74 @@
+name: CD
+
+# ===========================================================
+# 1. 실행 조건
+# ===========================================================
+
+on:
+  workflow_dispatch:
+
+# ===========================================================
+# 2. GitHub Actions 권한
+# ===========================================================
+
+permissions:
+  contents: read
+  id-token: write
+
+# ===========================================================
+# 3. GCE Connection Test Job
+# ===========================================================
+
+jobs:
+  connection-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      # -------------------------------------------------------
+      # 1. Repository Checkout
+      # -------------------------------------------------------
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # -------------------------------------------------------
+      # 2. Google Cloud 인증
+      # -------------------------------------------------------
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      # -------------------------------------------------------
+      # 3. Google Cloud CLI 설정
+      # -------------------------------------------------------
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      # -------------------------------------------------------
+      # 4. Google Cloud 인증 확인
+      # -------------------------------------------------------
+
+      - name: Check Google Cloud authentication
+        run: |
+          gcloud auth list
+          gcloud config get-value project
+
+      # -------------------------------------------------------
+      # 5. GCE SSH 연결 확인
+      # -------------------------------------------------------
+
+      - name: Check GCE SSH connection
+        run: |
+          gcloud compute ssh "${{ vars.GCE_INSTANCE }}" \
+            --project="${{ vars.GCP_PROJECT_ID }}" \
+            --zone="${{ vars.GCE_ZONE }}" \
+            --tunnel-through-iap \
+            --command="hostname && whoami && pwd" \
+            --quiet
