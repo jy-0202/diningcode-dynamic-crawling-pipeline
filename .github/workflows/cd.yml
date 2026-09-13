@@ -16,7 +16,15 @@ on:
       - main
 
 # ===========================================================
-# 2. GitHub Actions 권한
+# 2. 동시 실행 제어
+# ===========================================================
+
+concurrency:
+  group: diningcode-gce
+  cancel-in-progress: false
+
+# ===========================================================
+# 3. GitHub Actions 권한
 # ===========================================================
 
 permissions:
@@ -24,7 +32,7 @@ permissions:
   id-token: write
 
 # ===========================================================
-# 3. GCE Deploy Job
+# 4. GCE Deploy Job
 # ===========================================================
 
 jobs:
@@ -34,6 +42,7 @@ jobs:
       github.event.workflow_run.conclusion == 'success'
 
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       # -------------------------------------------------------
@@ -78,11 +87,55 @@ jobs:
 
           gcloud compute os-login ssh-keys add \
             --key-file="$HOME/.ssh/gce_cd_key.pub" \
-            --ttl=10m \
+            --ttl=30m \
             --project="${{ vars.GCP_PROJECT_ID }}"
 
       # -------------------------------------------------------
-      # 5. GCE에 CI 검증 Commit 배포
+      # 5. GCE 시작
+      # -------------------------------------------------------
+
+      - name: Start GCE
+        run: |
+          STATUS=$(gcloud compute instances describe "${{ vars.GCE_INSTANCE }}" \
+            --project="${{ vars.GCP_PROJECT_ID }}" \
+            --zone="${{ vars.GCE_ZONE }}" \
+            --format="value(status)")
+
+          echo "Current GCE status: $STATUS"
+
+          if [ "$STATUS" != "RUNNING" ]; then
+            gcloud compute instances start "${{ vars.GCE_INSTANCE }}" \
+              --project="${{ vars.GCP_PROJECT_ID }}" \
+              --zone="${{ vars.GCE_ZONE }}"
+          fi
+
+      # -------------------------------------------------------
+      # 6. GCE SSH 준비 대기
+      # -------------------------------------------------------
+
+      - name: Wait for GCE SSH
+        run: |
+          for attempt in {1..18}; do
+            if gcloud compute ssh "${{ vars.GCE_INSTANCE }}" \
+              --project="${{ vars.GCP_PROJECT_ID }}" \
+              --zone="${{ vars.GCE_ZONE }}" \
+              --tunnel-through-iap \
+              --ssh-key-file="$HOME/.ssh/gce_cd_key" \
+              --command="echo SSH_READY" \
+              --quiet; then
+              echo "GCE SSH 준비 완료"
+              exit 0
+            fi
+
+            echo "SSH 준비 대기: ${attempt}/18"
+            sleep 10
+          done
+
+          echo "GCE SSH 연결 준비 시간 초과"
+          exit 1
+
+      # -------------------------------------------------------
+      # 7. CI 검증 Commit 배포
       # -------------------------------------------------------
 
       - name: Deploy to GCE
@@ -131,3 +184,24 @@ jobs:
               echo \"GCE CD 배포 완료\"
             " \
             --quiet
+
+      # -------------------------------------------------------
+      # 8. GCE 중지
+      # -------------------------------------------------------
+
+      - name: Stop GCE
+        if: always()
+        run: |
+          STATUS=$(gcloud compute instances describe "${{ vars.GCE_INSTANCE }}" \
+            --project="${{ vars.GCP_PROJECT_ID }}" \
+            --zone="${{ vars.GCE_ZONE }}" \
+            --format="value(status)")
+
+          echo "Current GCE status: $STATUS"
+
+          if [ "$STATUS" != "TERMINATED" ]; then
+            gcloud compute instances stop "${{ vars.GCE_INSTANCE }}" \
+              --project="${{ vars.GCP_PROJECT_ID }}" \
+              --zone="${{ vars.GCE_ZONE }}" \
+              --quiet
+          fi
