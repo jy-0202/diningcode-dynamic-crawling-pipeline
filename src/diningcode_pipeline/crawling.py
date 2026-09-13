@@ -16,15 +16,18 @@ DiningCode 동적 크롤링 수집 모듈
 """
 
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from selenium import webdriver
+from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
+from urllib3.exceptions import ReadTimeoutError
 
 from .config import (
     BASE_URL,
@@ -76,6 +79,7 @@ def get_restaurant_rid(source_url: str) -> str:
 def create_driver() -> tuple[webdriver.Chrome, WebDriverWait]:
     """Chrome WebDriver와 WebDriverWait 객체를 생성한다."""
     options = Options()
+    options.page_load_strategy = 'eager'
     headless = os.getenv('HEADLESS', 'false').lower() == 'true'
 
     if headless:
@@ -89,6 +93,7 @@ def create_driver() -> tuple[webdriver.Chrome, WebDriverWait]:
         options.add_argument('--start-maximized')
 
     driver = webdriver.Chrome(options=options)
+    driver.set_page_load_timeout(30)
     wait = WebDriverWait(driver, WAIT_TIMEOUT)
 
     return driver, wait
@@ -273,18 +278,59 @@ def save_restaurant_detail_htmls(
 ) -> list[Path]:
     """중복 제거된 음식점의 상세페이지 HTML을 Raw 데이터로 저장한다."""
     detail_files: list[Path] = []
+    failed_restaurants: list[str] = []
+    max_attempts = 3
 
     for index, restaurant in enumerate(unique_restaurant_list, start=1):
+        restaurant_name = restaurant['restaurant_name']
+        source_url = restaurant['source_url']
+
         print(
             f'{index}/{len(unique_restaurant_list)} '
-            f'{restaurant["restaurant_name"]} HTML 저장 중'
+            f'{restaurant_name} HTML 저장 중'
         )
 
-        driver.get(restaurant['source_url'])
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'div#subleft-cont')))
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, 'h1.tit')))
+        load_success = False
 
-        rid = get_restaurant_rid(restaurant['source_url'])
+        for attempt in range(1, max_attempts + 1):
+            try:
+                driver.get(source_url)
+
+                wait.until(
+                    EC.presence_of_element_located(
+                        (By.CSS_SELECTOR, 'div#subleft-cont')
+                    )
+                )
+                wait.until(
+                    EC.presence_of_element_located(
+                        (By.CSS_SELECTOR, 'h1.tit')
+                    )
+                )
+
+                load_success = True
+                break
+
+            except (TimeoutException, ReadTimeoutError, WebDriverException) as error:
+                print(
+                    f'상세페이지 로딩 실패 '
+                    f'({attempt}/{max_attempts}): {restaurant_name}'
+                )
+                print(f'오류: {type(error).__name__}')
+
+                try:
+                    driver.execute_script('window.stop();')
+                except (WebDriverException, ReadTimeoutError):
+                    pass
+
+                if attempt < max_attempts:
+                    time.sleep(2)
+
+        if not load_success:
+            print(f'상세페이지 수집 실패, 건너뜀: {restaurant_name}')
+            failed_restaurants.append(restaurant_name)
+            continue
+
+        rid = get_restaurant_rid(source_url)
 
         detail_file = save_raw_html(
             html=driver.page_source,
@@ -293,10 +339,14 @@ def save_restaurant_detail_htmls(
         )
         detail_files.append(detail_file)
 
-    if len(detail_files) != len(unique_restaurant_list):
-        raise ValueError('상세 HTML 저장 건수와 음식점 수가 다릅니다.')
+    if not detail_files:
+        raise ValueError('상세 HTML을 한 건도 저장하지 못했습니다.')
 
     print('상세 HTML 저장 완료:', len(detail_files))
+    print('상세 HTML 저장 실패:', len(failed_restaurants))
+
+    if failed_restaurants:
+        print('수집 실패 음식점:', ', '.join(failed_restaurants))
 
     return detail_files
 
