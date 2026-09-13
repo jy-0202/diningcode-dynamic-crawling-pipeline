@@ -1,0 +1,169 @@
+name: DiningCode Batch
+
+# ===========================================================
+# 1. 실행 조건
+# ===========================================================
+
+on:
+  workflow_dispatch:
+
+# ===========================================================
+# 2. 동시 실행 제어
+# ===========================================================
+
+concurrency:
+  group: diningcode-gce
+  cancel-in-progress: false
+
+# ===========================================================
+# 3. GitHub Actions 권한
+# ===========================================================
+
+permissions:
+  contents: read
+  id-token: write
+
+# ===========================================================
+# 4. GCE Batch Job
+# ===========================================================
+
+jobs:
+  batch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      # -------------------------------------------------------
+      # 1. Repository Checkout
+      # -------------------------------------------------------
+
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # -------------------------------------------------------
+      # 2. Google Cloud 인증
+      # -------------------------------------------------------
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      # -------------------------------------------------------
+      # 3. Google Cloud CLI 설정
+      # -------------------------------------------------------
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      # -------------------------------------------------------
+      # 4. OS Login 임시 SSH Key 등록
+      # -------------------------------------------------------
+
+      - name: Configure OS Login SSH key
+        run: |
+          mkdir -p "$HOME/.ssh"
+
+          ssh-keygen \
+            -t ed25519 \
+            -N "" \
+            -f "$HOME/.ssh/gce_batch_key"
+
+          gcloud compute os-login ssh-keys add \
+            --key-file="$HOME/.ssh/gce_batch_key.pub" \
+            --ttl=60m \
+            --project="${{ vars.GCP_PROJECT_ID }}"
+
+      # -------------------------------------------------------
+      # 5. GCE 시작
+      # -------------------------------------------------------
+
+      - name: Start GCE
+        run: |
+          STATUS=$(gcloud compute instances describe "${{ vars.GCE_INSTANCE }}" \
+            --project="${{ vars.GCP_PROJECT_ID }}" \
+            --zone="${{ vars.GCE_ZONE }}" \
+            --format="value(status)")
+
+          echo "Current status: $STATUS"
+
+          if [ "$STATUS" != "RUNNING" ]; then
+            gcloud compute instances start "${{ vars.GCE_INSTANCE }}" \
+              --project="${{ vars.GCP_PROJECT_ID }}" \
+              --zone="${{ vars.GCE_ZONE }}"
+          fi
+
+      # -------------------------------------------------------
+      # 6. GCE SSH 준비 대기
+      # -------------------------------------------------------
+
+      - name: Wait for GCE SSH
+        run: |
+          for attempt in {1..18}; do
+            if gcloud compute ssh "${{ vars.GCE_INSTANCE }}" \
+              --project="${{ vars.GCP_PROJECT_ID }}" \
+              --zone="${{ vars.GCE_ZONE }}" \
+              --tunnel-through-iap \
+              --ssh-key-file="$HOME/.ssh/gce_batch_key" \
+              --command="echo SSH_READY" \
+              --quiet; then
+              exit 0
+            fi
+
+            echo "SSH 준비 대기: ${attempt}/18"
+            sleep 10
+          done
+
+          echo "GCE SSH 연결 준비 시간 초과"
+          exit 1
+
+      # -------------------------------------------------------
+      # 7. 전체 데이터 파이프라인 실행
+      # -------------------------------------------------------
+
+      - name: Run DiningCode pipeline
+        env:
+          GCE_DB_NAME: ${{ vars.GCE_DB_NAME }}
+          GCE_DB_USER: ${{ vars.GCE_DB_USER }}
+          GCE_DB_PASSWORD: ${{ secrets.GCE_DB_PASSWORD }}
+        run: |
+          DB_NAME_B64=$(printf '%s' "$GCE_DB_NAME" | base64 -w 0)
+          DB_USER_B64=$(printf '%s' "$GCE_DB_USER" | base64 -w 0)
+          DB_PASSWORD_B64=$(printf '%s' "$GCE_DB_PASSWORD" | base64 -w 0)
+
+          gcloud compute ssh "${{ vars.GCE_INSTANCE }}" \
+            --project="${{ vars.GCP_PROJECT_ID }}" \
+            --zone="${{ vars.GCE_ZONE }}" \
+            --tunnel-through-iap \
+            --ssh-key-file="$HOME/.ssh/gce_batch_key" \
+            --command="
+              set -e
+
+              APP_DIR=\"\$HOME/diningcode-dynamic-crawling-pipeline\"
+              cd \"\$APP_DIR\"
+
+              export DB_HOST=localhost
+              export DB_PORT=3306
+              export DB_NAME=\$(printf '%s' '$DB_NAME_B64' | base64 -d)
+              export DB_USER=\$(printf '%s' '$DB_USER_B64' | base64 -d)
+              export DB_PASSWORD=\$(printf '%s' '$DB_PASSWORD_B64' | base64 -d)
+
+              bash scripts/run_pipeline.sh
+            " \
+            --quiet
+
+      # -------------------------------------------------------
+      # 8. GCE 중지
+      # -------------------------------------------------------
+
+      - name: Stop GCE
+        if: always()
+        run: |
+          gcloud compute instances stop "${{ vars.GCE_INSTANCE }}" \
+            --project="${{ vars.GCP_PROJECT_ID }}" \
+            --zone="${{ vars.GCE_ZONE }}" \
+            --quiet
