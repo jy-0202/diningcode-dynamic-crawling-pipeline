@@ -6,7 +6,9 @@ Selenium을 활용해 DiningCode의 동적 페이지에서 음식점 정보를 �
 
 까지 수행하는 개인 데이터 수집 파이프라인 프로젝트입니다.
 
-로컬 실행뿐 아니라 pytest, Ruff, GitHub Actions CI, Windows Self-hosted Runner 기반 전체 배치 실행, Google Compute Engine(GCE) 실행 환경 및 CI 성공 후 자동 CD까지 구성했습니다.
+로컬 실행뿐 아니라 pytest, Ruff, GitHub Actions CI, Windows Self-hosted Runner 기반 전체 Pipeline 실행, Google Compute Engine(GCE) 실행 환경, CI 성공 후 자동 CD, GCE 기반 전체 Batch 자동 실행까지 구성했습니다.
+
+GCE Batch 실행 시에는 VM을 자동으로 시작하고 신규 데이터를 크롤링한 뒤 MySQL 적재 및 검증까지 수행하고, 작업 종료 후 VM을 다시 중지합니다.
 
 ---
 
@@ -28,7 +30,10 @@ JavaScript 기반 동적 웹페이지에서 필요한 데이터를 수집하고,
 - Windows Self-hosted Runner 기반 전체 데이터 파이프라인 실행
 - Google Compute Engine 기반 Linux 실행 환경 구성
 - GitHub Actions CI 성공 후 GCE 자동 배포
-- Workload Identity Federation, IAP, OS Login 기반 CD 인증
+- GCE VM 자동 Start / Stop
+- GCE 기반 Crawling → MySQL 전체 Batch 자동 실행
+- Workload Identity Federation, IAP, OS Login 기반 인증
+- 실행 시각 및 batch_id의 Asia/Seoul 시간대 적용
 - 실행 결과 Artifact 보관
 
 ---
@@ -87,6 +92,8 @@ run_load()
 ```
 
 `main.py`가 전체 파이프라인의 실행 진입점 역할을 합니다.
+
+GCE에서는 `scripts/run_pipeline.sh`가 전체 Pipeline 실행을 담당합니다.
 
 ---
 
@@ -164,7 +171,15 @@ Selenium을 이용한 동적 페이지 탐색과 Raw HTML 저장을 담당합니
 - `source_url` 기준 후보 중복 제거
 - 음식점 목록 페이지 Raw HTML 저장
 - 음식점별 상세페이지 Raw HTML 저장
+- `page_load_strategy='eager'` 적용
+- 상세페이지 로딩 제한시간 설정
+- 상세페이지 로딩 실패 시 최대 3회 재시도
+- 단일 상세페이지 실패 시 실패 내역 기록 후 다음 음식점 수집 계속
 - 실행 종료 시 WebDriver 자원 해제
+
+외부 사이트의 일시적인 응답 지연으로 전체 Batch가 중단되는 것을 줄이기 위해 상세페이지 단위의 Timeout 및 재시도 처리를 적용했습니다.
+
+전체 상세페이지를 한 건도 저장하지 못한 경우에는 정상적인 수집 결과로 볼 수 없으므로 Pipeline을 실패 처리합니다.
 
 ### Extract
 
@@ -286,8 +301,10 @@ Raw, Interim, Processed 데이터는 동일한 `batch_id`를 사용하여 하나
 예:
 
 ```text
-20260911_041026
+20260913_205533
 ```
+
+GCE Batch에서는 `Asia/Seoul` 시간대를 명시하여 실행 로그와 `batch_id`를 한국시간 기준으로 생성합니다.
 
 ### Raw
 
@@ -375,9 +392,13 @@ count_status    : 일치
 .
 ├── .github/
 │   └── workflows/
+│       ├── batch.yml
 │       ├── cd.yml
 │       ├── ci.yml
 │       └── pipeline.yml
+│
+├── scripts/
+│   └── run_pipeline.sh
 │
 ├── src/
 │   └── diningcode_pipeline/
@@ -434,6 +455,7 @@ count_status    : 일치
 - Xvfb
 - Python 3.12
 - MySQL
+- Asia/Seoul 실행 시간대
 
 ### 주요 Python 라이브러리
 
@@ -509,7 +531,7 @@ DB_PASSWORD=
 `database.py`는 다음 두 방식을 지원합니다.
 
 ```text
-로컬 / GCE
+로컬
 → .env
 
 자동화 환경
@@ -524,6 +546,24 @@ DB_PORT
 DB_NAME
 DB_USER
 DB_PASSWORD
+```
+
+GCE Batch에서는 DB 이름과 사용자를 Repository Variables로, 비밀번호는 Repository Secret으로 관리합니다.
+
+```text
+Variables
+GCE_DB_NAME
+GCE_DB_USER
+
+Secret
+GCE_DB_PASSWORD
+```
+
+GCE 내부 MySQL을 사용하므로 Batch 실행 시 다음 값은 Workflow에서 지정합니다.
+
+```text
+DB_HOST=localhost
+DB_PORT=3306
 ```
 
 ---
@@ -549,17 +589,35 @@ python main.py
 8. 현재 배치 DB 반영 검증
 ```
 
+
 ---
 
 ## 14. GCE 실행
 
 GCE에서는 Headless Chrome 대신 Xvfb 가상 디스플레이에서 일반 Chrome을 실행합니다.
 
-전체 Pipeline 실행 예:
+전체 Pipeline 실행은 다음 스크립트로 표준화했습니다.
 
 ```bash
-xvfb-run -a env HEADLESS=false .venv/bin/python main.py
+bash scripts/run_pipeline.sh
 ```
+
+스크립트 내부에서는 다음 형태로 Pipeline을 실행합니다.
+
+```bash
+xvfb-run -a env HEADLESS=false \
+  .venv/bin/python -c "from main import main; main()"
+```
+
+`main()`에서 발생한 예외가 프로세스의 실패 상태로 전달되도록 직접 호출하며, GitHub Actions가 Pipeline의 성공 또는 실패를 정확하게 판단할 수 있도록 합니다.
+
+실행 스크립트에서는 다음 시간대를 명시합니다.
+
+```bash
+export TZ=Asia/Seoul
+```
+
+따라서 실행 시작·종료 로그와 Python의 `datetime.now()`를 이용한 `batch_id`가 한국시간 기준으로 생성됩니다.
 
 GCE VM 내부 MySQL은 `127.0.0.1:3306`에만 바인딩하여 외부에 DB 포트를 공개하지 않습니다.
 
@@ -639,6 +697,12 @@ Ruff 코드 검사:
 python -m ruff check .
 ```
 
+현재 기준:
+
+```text
+All checks passed!
+```
+
 ---
 
 ## 17. GitHub Actions CI
@@ -661,13 +725,15 @@ pytest
 
 CI는 실제 DiningCode 크롤링이나 실제 MySQL 연결을 수행하지 않고 단위 테스트와 정적 코드 검사를 수행합니다.
 
+외부 사이트에 대한 데이터 수집과 코드 품질 검사를 분리하여 일반적인 코드 변경마다 실제 크롤링이 반복되지 않도록 구성했습니다.
+
 ---
 
-## 18. GitHub Actions 전체 Pipeline
+## 18. Windows Self-hosted Runner 전체 Pipeline
 
 `.github/workflows/pipeline.yml`
 
-실제 크롤링부터 MySQL 적재까지 실행하는 Workflow를 별도로 구성했습니다.
+Windows Self-hosted Runner에서도 실제 크롤링부터 MySQL 적재까지 전체 Pipeline을 실행할 수 있도록 별도의 Workflow를 구성했습니다.
 
 전체 Pipeline은 `workflow_dispatch`를 사용하여 GitHub Actions 화면에서 수동으로 실행합니다.
 
@@ -735,7 +801,7 @@ DiningCode Pipeline
 MySQL
 ```
 
-GCE에서 실제로 다음 단계를 검증했습니다.
+GCE에서 실제로 다음 전체 단계를 검증했습니다.
 
 ```text
 Crawling
@@ -782,6 +848,8 @@ Xvfb + 일반 Chrome
 
 CI를 통과한 코드를 Google Compute Engine에 자동 배포하는 CD Workflow를 구성했습니다.
 
+현재는 VM이 중지되어 있어도 CD가 자동으로 VM을 시작한 뒤 배포를 수행하고, 배포가 끝나면 다시 VM을 중지합니다.
+
 ```text
 main push
     ↓
@@ -799,13 +867,13 @@ Workload Identity Federation
     ↓
 GCP Service Account
     ↓
-IAP Tunnel
+GCE 자동 Start
     ↓
-OS Login
-    ↓
-GCE
+IAP Tunnel + OS Login
     ↓
 CI가 검증한 동일 Commit 배포
+    ↓
+GCE 자동 Stop
 ```
 
 ### CI와 CD 연결
@@ -829,10 +897,10 @@ CD는 단순히 실행 시점의 최신 `main`을 배포하지 않고 CI가 성�
 검증 사례:
 
 ```text
-CI 검증 Commit:
+CI 검증 Commit
 97227d9d0490415ae1c7787de4be900f4f689f4f
 
-GCE 배포 Commit:
+GCE 배포 Commit
 97227d9
 ```
 
@@ -860,21 +928,7 @@ CD용 Service Account에 필요한 IAM 권한을 별도로 부여하고 IAP를 �
 
 ### 임시 SSH Key
 
-GitHub-hosted Runner는 매 실행마다 임시 SSH Key를 생성합니다.
-
-```text
-GitHub Runner 시작
-    ↓
-임시 SSH Key 생성
-    ↓
-Public Key를 OS Login에 등록
-    ↓
-TTL 10분
-    ↓
-GCE 배포
-    ↓
-Runner 종료
-```
+GitHub-hosted Runner는 매 실행마다 임시 SSH Key를 생성하여 OS Login에 등록합니다.
 
 장기 SSH Private Key를 GitHub Secrets에 저장하지 않습니다.
 
@@ -891,14 +945,79 @@ CD의 목적은 **검증된 최신 코드를 GCE에 배포하는 것**입니다.
 → GCE 코드 배포
 
 실제 데이터 수집
-→ 별도 실행
+→ 별도 Batch Workflow
 ```
 
 README나 테스트 코드 변경만으로 외부 사이트 크롤링이 반복 실행되는 구조를 방지하기 위해 배포와 Batch 실행을 분리했습니다.
 
 ---
 
-## 22. 기준 실행 결과
+## 22. GCE 전체 Batch 자동 실행
+
+`.github/workflows/batch.yml`
+
+GCE 환경에서 실제 신규 데이터 수집부터 MySQL 저장까지 전체 Pipeline을 자동 실행하는 Workflow를 구성했습니다.
+
+현재는 `workflow_dispatch`를 사용하여 필요한 시점에 GitHub Actions 화면에서 실행합니다.
+
+```text
+GitHub Actions
+    ↓
+GCP 인증
+    ↓
+임시 OS Login SSH Key 생성
+    ↓
+GCE 자동 Start
+    ↓
+SSH 연결 준비 확인
+    ↓
+scripts/run_pipeline.sh
+    ↓
+Xvfb + 일반 Chrome
+    ↓
+DiningCode 신규 Crawling
+    ↓
+Raw HTML
+    ↓
+Extract
+    ↓
+Interim CSV
+    ↓
+Preprocess
+    ↓
+Processed CSV
+    ↓
+MySQL UPSERT
+    ↓
+현재 배치 DB 반영 검증
+    ↓
+GCE 자동 Stop
+```
+
+Pipeline의 중간 단계가 실패하더라도 마지막 VM 중지 단계는 실행되도록 구성하여 오류 발생 시 VM이 불필요하게 계속 실행되는 상황을 줄였습니다.
+
+### 주기 실행 구성
+
+GitHub Actions의 `schedule`을 이용한 주기 실행 구조도 구성했습니다.
+
+예를 들어 다음 설정은 매주 일요일 오전 9시 KST에 실행됩니다.
+
+```yaml
+schedule:
+  - cron: '0 0 * * 0'
+```
+
+GitHub Actions의 cron은 UTC를 기준으로 하므로 `00:00 UTC`는 `09:00 KST`에 해당합니다.
+
+주기 실행 기능을 구성한 뒤 실제 Pipeline은 동일한 Batch Job을 사용하도록 설계했습니다.
+
+다만 이 프로젝트는 상시 운영 서비스가 아닌 포트폴리오 목적의 제한적 데이터 수집 프로젝트이므로, 불필요한 GCE 비용과 대상 사이트에 대한 반복 요청을 방지하기 위해 **최종 저장소에서는 자동 schedule을 비활성화하고 `workflow_dispatch`만 유지합니다.**
+
+필요한 경우 schedule 설정을 다시 활성화하여 정기 Batch로 운영할 수 있습니다.
+
+---
+
+## 23. 기준 실행 결과
 
 ### Windows Self-hosted Runner
 
@@ -906,43 +1025,80 @@ README나 테스트 코드 변경만으로 외부 사이트 크롤링이 반복 
 
 ```text
 음식점 후보              : 75
-source_url 중복 제거 후   : 72
-상세 Raw HTML             : 72
-Interim CSV               : 72
-Processed CSV             : 72
-Processed 컬럼            : 16
-restaurant_id 중복        : 0
-source_url 중복           : 0
-MySQL 배치 반영           : 72 / 72
-count_status              : 일치
+source_url 중복 제거 후  : 72
+상세 Raw HTML            : 72
+Interim CSV              : 72
+Processed CSV            : 72
+Processed 컬럼           : 16
+restaurant_id 중복       : 0
+source_url 중복          : 0
+MySQL 배치 반영          : 72 / 72
+count_status             : 일치
 ```
 
-### Google Compute Engine
+### Google Compute Engine 수동 실행
 
 2026-09-11 GCE 실행 기준:
 
 ```text
 음식점 후보              : 75
-source_url 중복 제거 후   : 72
-상세 Raw HTML             : 72
-Interim CSV               : 72
-Processed CSV             : 72
-Processed 컬럼            : 16
-restaurant_id 중복        : 0
-source_url 중복           : 0
-MySQL processed_count     : 72
-MySQL loaded_count        : 72
-MySQL db_count            : 72
-count_status              : 일치
+source_url 중복 제거 후  : 72
+상세 Raw HTML            : 72
+Interim CSV              : 72
+Processed CSV            : 72
+Processed 컬럼           : 16
+restaurant_id 중복       : 0
+source_url 중복          : 0
+MySQL processed_count    : 72
+MySQL loaded_count       : 72
+MySQL db_count           : 72
+count_status             : 일치
 ```
 
-GCE에서도 Crawling부터 MySQL Load까지 실제 실행하여 동일한 데이터 계층과 적재 흐름이 동작함을 확인했습니다.
+### GitHub Actions GCE Batch
+
+2026-09-13 전체 자동 Batch 실행 기준:
+
+```text
+음식점 후보              : 75
+source_url 중복 제거 후  : 72
+
+상세 Raw HTML 저장       : 72
+상세 HTML 저장 실패      : 0
+
+Interim CSV              : 72
+
+Processed CSV            : 72
+Processed 컬럼           : 16
+restaurant_id 중복       : 0
+source_url 중복          : 0
+
+MySQL processed_count    : 72
+MySQL loaded_count       : 72
+MySQL db_count           : 72
+count_status             : 일치
+```
+
+전체 자동 Batch에서는 다음 과정이 하나의 Workflow에서 정상 완료되었습니다.
+
+```text
+GCE 자동 Start
+→ 신규 DiningCode 크롤링
+→ Raw HTML 저장
+→ Extract
+→ Interim CSV
+→ Preprocess
+→ Processed CSV
+→ MySQL UPSERT
+→ 배치 반영 검증
+→ GCE 자동 Stop
+```
 
 수집 대상 사이트의 데이터와 노출 순서는 변경될 수 있으므로 위 수치는 고정 요구사항이 아니라 기준 실행 결과입니다.
 
 ---
 
-## 23. CI / CD / Batch 역할 분리
+## 24. CI / CD / Batch 역할 분리
 
 ```text
 CI
@@ -951,53 +1107,79 @@ GitHub-hosted Runner
 → pytest
 → 코드 품질 검증
 
+
 CD
 GitHub-hosted Runner
 → WIF 인증
+→ GCE Start
 → IAP + OS Login
-→ GCE에 CI 검증 Commit 배포
+→ CI 검증 Commit 배포
+→ GCE Stop
 
-Batch Pipeline
-Windows Self-hosted Runner 또는 GCE
-→ Selenium Crawling
+
+Batch
+GitHub-hosted Runner
+→ WIF 인증
+→ GCE Start
+→ IAP + OS Login
+→ Xvfb + Chrome
+→ 신규 Selenium Crawling
 → Extract
 → Preprocess
 → MySQL Load
+→ DB 반영 검증
+→ GCE Stop
 ```
 
-코드 검증, 배포, 실제 외부 데이터 수집의 책임을 분리하여 운영합니다.
+코드 품질 검증, 배포, 실제 외부 데이터 수집의 책임을 분리했습니다.
+
+특히 CI/CD가 실행될 때마다 외부 사이트 크롤링이 발생하지 않도록 CD와 데이터 Batch를 독립적인 Workflow로 구성했습니다.
 
 ---
 
-## 24. 보안 및 운영 고려사항
+## 25. 보안 및 운영 고려사항
 
 - `.env`는 Git에 포함하지 않음
-- GitHub Actions 전체 Pipeline의 DB 접속 정보는 Repository Secrets 사용
+- DB 비밀번호는 GitHub Repository Secret으로 관리
+- 일반 설정값은 Repository Variables로 분리
 - GCE CD 인증에 장기 Service Account JSON Key를 사용하지 않음
 - GitHub OIDC + Workload Identity Federation 사용
 - Workload Identity Provider의 Repository / Branch 조건 제한
-- CD용 Service Account에 필요한 IAM 권한을 별도로 부여
+- CD 및 Batch용 Service Account에 필요한 IAM 권한을 부여
 - GCE SSH는 IAP + OS Login 사용
-- CD 실행 시 TTL이 있는 임시 SSH Key 사용
+- GitHub-hosted Runner에서 임시 SSH Key 생성
+- 장기 SSH Private Key를 Repository Secrets에 저장하지 않음
 - GCE MySQL은 `127.0.0.1:3306`에만 바인딩
 - MySQL 3306 포트를 외부 공개하지 않음
 - 실제 크롤링 실행과 코드 배포를 분리하여 불필요한 외부 사이트 호출 방지
+- GCE Batch 완료 또는 실패 후 VM 중지 단계 실행
+- 상시 VM 운영 대신 필요할 때 VM을 시작하고 작업 후 중지하여 컴퓨팅 비용 절감
+- 포트폴리오 운영 상태에서는 자동 주기 크롤링을 비활성화하여 불필요한 반복 요청 방지
 
 ---
 
-## 25. 향후 개선
+## 26. 향후 개선
 
-현재까지 로컬, Windows Self-hosted Runner, GCE 기반 Pipeline 실행 및 CI/CD 자동 배포를 완료했습니다.
+현재까지 다음 범위를 구현하고 실제 실행으로 검증했습니다.
+
+```text
+로컬 Pipeline
+→ Windows Self-hosted Runner Pipeline
+→ GitHub Actions CI
+→ Google Compute Engine 실행 환경
+→ CI 성공 후 GCE 자동 CD
+→ GCE 자동 Start / Stop
+→ GCE 신규 크롤링부터 MySQL까지 전체 Batch 자동 실행
+```
 
 향후에는 다음 내용을 검토할 예정입니다.
 
 - Raw / Interim / Processed 데이터의 Object Storage 저장
 - Cloud SQL 또는 RDS 등 관리형 MySQL 연동
-- GCE Batch 실행 스케줄링
-- 실행 로그 및 실패 상태 모니터링
+- 실행 로그 및 실패 상태 모니터링과 알림 기능
 - CD 배포 실패 시 Rollback 전략
-- Dependency 설치 최적화 및 배포 시간 단축
-- README-only 변경 시 CI/CD 실행 조건 최적화
-- AWS Lambda / S3 / RDS / Step Functions / EventBridge 기반 서버리스 구조 재검토
+- Dependency 설치 및 배포 시간 최적화
+- AWS EC2 / SSM / Step Functions / EventBridge Scheduler 기반 오케스트레이션 검토
+- 필요 시 주기 Batch schedule 재활성화
 
-외부 사이트의 접근 정책과 실행 환경의 제약을 고려하여 실제 동작을 검증한 방식만 최종 배포 구조에 반영합니다.
+외부 사이트의 접근 정책과 실행 환경의 제약을 고려하여 실제 동작을 검증한 방식만 최종 실행 구조에 반영합니다.
