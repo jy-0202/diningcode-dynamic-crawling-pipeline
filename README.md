@@ -12,6 +12,16 @@ GCE Batch 실행 시에는 VM을 자동으로 시작하고 신규 데이터를 �
 
 ---
 
+## Demo
+
+GitHub Actions에서 GCE VM을 자동으로 시작한 뒤 신규 데이터를 크롤링하고,
+Raw HTML → Interim CSV → Processed CSV → MySQL UPSERT까지 전체 Batch Pipeline을 실행한 후
+VM을 다시 자동 중지하는 과정을 확인할 수 있습니다.
+
+- 실행 영상: [YouTube Demo](https://youtu.be/vJRltBh7z7k)
+
+---
+
 ## 1. 프로젝트 목적
 
 JavaScript 기반 동적 웹페이지에서 필요한 데이터를 수집하고, 원본부터 최종 적재 데이터까지 단계별로 관리하는 데이터 파이프라인을 구현하는 것을 목표로 합니다.
